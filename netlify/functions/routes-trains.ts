@@ -66,8 +66,8 @@ const handler: Handler = async (event) => {
       }
     }
 
-    // Departure monitor
-    const dmUrl = `https://api.transport.nsw.gov.au/v1/tp/departure_mon?outputFormat=rapidJSON&coordOutputFormat=EPSG%3A4326&mode=direct&type_dm=${dmType}&name_dm=${encodeURIComponent(dmName)}&departureMonitorMacro=true&TfNSWDM=true&version=10.2.1.42`;
+    // Departure monitor - request up to 90 min of departures with limit=40
+    const dmUrl = `https://api.transport.nsw.gov.au/v1/tp/departure_mon?outputFormat=rapidJSON&coordOutputFormat=EPSG%3A4326&mode=direct&type_dm=${dmType}&name_dm=${encodeURIComponent(dmName)}&departureMonitorMacro=true&TfNSWDM=true&version=10.2.1.42&limit=40`;
 
     const dmResponse = await fetch(dmUrl, {
       headers: { 'Authorization': `apikey ${apiKey}` },
@@ -82,7 +82,7 @@ const handler: Handler = async (event) => {
         const seenTrips = new Set<string>(); // Deduplicate by tripId + scheduledTime
         const destLower = destination.toLowerCase().replace(/\s*station\s*/gi, '').trim();
 
-        for (const stopEvent of events.slice(0, 60)) {
+        for (const stopEvent of events.slice(0, 80)) {
           const transportation = (stopEvent.transportation || {}) as Record<string, unknown>;
           const line = (transportation.disassembledName || transportation.number || '') as string;
           const product = (transportation.product || {}) as Record<string, unknown>;
