@@ -1,0 +1,354 @@
+import type { Handler, HandlerEvent, HandlerContext } from '@netlify/functions';
+import { schedule } from '@netlify/functions';
+import {
+  db,
+  getAlertSchedulesRef,
+  getAlertDeliveryStateRef,
+  getRouteCardsRef,
+  getSettingsRef,
+} from '../../lib/firestore';
+import { sendMessageWithRetry } from '../../lib/telegram';
+
+// ─── Helpers ────────────────────────────────────────────────────────
+
+function isWithinWindow(minutesUntilDeparture: number, targetMinutes: number): boolean {
+  return minutesUntilDeparture >= targetMinutes - 0.5 && minutesUntilDeparture < targetMinutes + 0.5;
+}
+
+function formatTime12h(time: string): string {
+  const [h, m] = time.split(':').map(Number);
+  const period = h >= 12 ? 'pm' : 'am';
+  const hour12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+  return `${hour12}:${String(m).padStart(2, '0')} ${period}`;
+}
+
+interface LiveTrain {
+  route: string;
+  platform: string;
+  scheduledTime: string;
+  estimatedTime?: string;
+  status: string;
+  delayMinutes?: number;
+  cancelled: boolean;
+}
+
+// ─── Fetch live train for a route at departure time ─────────────────
+
+async function fetchLiveTrainStatus(
+  origin: string,
+  destination: string,
+  departureTimeHHmm: string,
+  apiKey: string
+): Promise<LiveTrain | null> {
+  try {
+    // Use Trip Planner to find trains between origin and destination
+    const url = `https://api.transport.nsw.gov.au/v1/tp/trip?outputFormat=rapidJSON&coordOutputFormat=EPSG%3A4326&depArrMacro=dep&type_origin=any&name_origin=${encodeURIComponent(origin)}&type_destination=any&name_destination=${encodeURIComponent(destination)}&calcNumberOfTrips=5&TfNSWTR=true&version=10.2.1.42`;
+
+    const res = await fetch(url, { headers: { 'Authorization': `apikey ${apiKey}` } });
+    if (!res.ok) return null;
+
+    const data = (await res.json()) as Record<string, unknown>;
+    const journeys = (data?.journeys || []) as Array<Record<string, unknown>>;
+
+    // Find the journey closest to user's saved departure time
+    const [targetH, targetM] = departureTimeHHmm.split(':').map(Number);
+
+    for (const journey of journeys) {
+      const legs = (journey.legs || []) as Array<Record<string, unknown>>;
+      if (legs.length !== 1) continue; // Direct services only
+
+      const leg = legs[0];
+      const transportation = (leg.transportation || {}) as Record<string, unknown>;
+      const product = (transportation.product || {}) as Record<string, unknown>;
+      if ((product.class as number) === 100) continue; // Skip walking
+
+      const originInfo = (leg.origin || {}) as Record<string, unknown>;
+      const scheduledTime = (originInfo.departureTimePlanned as string) || '';
+      const estimatedTime = (originInfo.departureTimeEstimated as string) || undefined;
+
+      if (!scheduledTime) continue;
+
+      // Check if this train's scheduled time is close to our target
+      const schedDate = new Date(scheduledTime);
+      const schedH = schedDate.getHours();
+      const schedM = schedDate.getMinutes();
+      const diffMins = Math.abs((schedH * 60 + schedM) - (targetH * 60 + targetM));
+      if (diffMins > 10) continue; // Only match within 10 min of target
+
+      const platformRaw = (originInfo.disassembledName as string) || '';
+      const platformMatch = platformRaw.match(/(\d+|[A-Z])$/);
+      const platform = platformMatch ? platformMatch[1] : '';
+      const line = (transportation.disassembledName || transportation.number || '') as string;
+      const isCancelled = leg.isCancelled === true;
+
+      let status = 'on time';
+      let delayMinutes: number | undefined;
+
+      if (isCancelled) {
+        status = 'cancelled';
+      } else if (estimatedTime && scheduledTime) {
+        const diff = (new Date(estimatedTime).getTime() - new Date(scheduledTime).getTime()) / 60000;
+        if (diff > 1) {
+          status = 'delayed';
+          delayMinutes = Math.round(diff);
+        }
+      }
+
+      return { route: line, platform, scheduledTime, estimatedTime, status, delayMinutes, cancelled: isCancelled };
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+// ─── Message Formatting ─────────────────────────────────────────────
+
+function formatReminderMessage(opts: {
+  title: string;
+  origin: string;
+  destination: string;
+  departureTime: string;
+  offsetMinutes: number;
+  train: LiveTrain | null;
+}): string {
+  const { title, origin, destination, departureTime, offsetMinutes, train } = opts;
+  const shortOrigin = origin.replace(/\s*(Station|Wharf|Light Rail)\s*/gi, '').trim();
+  const shortDest = destination.replace(/\s*(Station|Wharf|Light Rail)\s*/gi, '').trim();
+
+  const lines: string[] = [
+    `🚆 <b>${title}</b>`,
+    ``,
+    `${shortOrigin} → ${shortDest}`,
+    `⏰ <b>${formatTime12h(departureTime)}</b> — ${offsetMinutes} min reminder`,
+  ];
+
+  if (train) {
+    if (train.platform) {
+      lines.push(`📍 Platform ${train.platform}`);
+    }
+    if (train.route) {
+      lines.push(`🚇 ${train.route}`);
+    }
+
+    if (train.cancelled) {
+      lines.push(``);
+      lines.push(`❌ <b>CANCELLED</b> — Check app for alternatives`);
+    } else if (train.status === 'delayed' && train.delayMinutes) {
+      lines.push(``);
+      lines.push(`⚠️ Delayed ${train.delayMinutes} min`);
+      if (train.estimatedTime) {
+        const est = new Date(train.estimatedTime);
+        lines.push(`New time: ${est.getHours().toString().padStart(2, '0')}:${est.getMinutes().toString().padStart(2, '0')}`);
+      }
+    } else {
+      lines.push(``);
+      lines.push(`✅ On time`);
+    }
+  } else {
+    lines.push(``);
+    lines.push(`ℹ️ Live status unavailable`);
+  }
+
+  return lines.join('\n');
+}
+
+function formatChangeMessage(opts: {
+  title: string;
+  origin: string;
+  destination: string;
+  departureTime: string;
+  change: string;
+  train: LiveTrain;
+}): string {
+  const { title, origin, destination, departureTime, change, train } = opts;
+  const shortOrigin = origin.replace(/\s*(Station|Wharf|Light Rail)\s*/gi, '').trim();
+  const shortDest = destination.replace(/\s*(Station|Wharf|Light Rail)\s*/gi, '').trim();
+
+  const lines: string[] = [
+    `⚠️ <b>${title} — Update</b>`,
+    ``,
+    `${shortOrigin} → ${shortDest} (${formatTime12h(departureTime)})`,
+    ``,
+    change,
+  ];
+
+  if (train.platform) {
+    lines.push(`📍 Platform ${train.platform}`);
+  }
+
+  return lines.join('\n');
+}
+
+// ─── Main Scheduler ─────────────────────────────────────────────────
+
+const schedulerHandler: Handler = async (_event: HandlerEvent, _context: HandlerContext) => {
+  const apiKey = process.env.TFN_API_KEY;
+
+  try {
+    const usersSnapshot = await db.collection('users').get();
+
+    for (const userDoc of usersSnapshot.docs) {
+      const userId = userDoc.id;
+      const schedulesSnapshot = await getAlertSchedulesRef(userId)
+        .where('enabled', '==', true)
+        .get();
+
+      if (schedulesSnapshot.empty) continue;
+
+      // Get Telegram credentials
+      const settingsDoc = await getSettingsRef(userId).get();
+      const settings = settingsDoc.data();
+      const botToken = settings?.telegramBotToken || process.env.TELEGRAM_BOT_TOKEN;
+      const chatId = settings?.telegramChatId || process.env.TELEGRAM_CHAT_ID;
+      if (!botToken || !chatId) continue;
+
+      const now = new Date();
+      const today = now.getDay();
+
+      for (const scheduleDoc of schedulesSnapshot.docs) {
+        const alert = scheduleDoc.data();
+        const scheduleId = scheduleDoc.id;
+        const departureTime: string = alert.departureTime;
+        if (!departureTime) continue;
+
+        // Check if schedule applies today
+        if (alert.oneTimeDate) {
+          const targetDate = new Date(alert.oneTimeDate);
+          if (targetDate.toDateString() !== now.toDateString()) continue;
+        } else if (alert.days?.length > 0) {
+          if (!alert.days.includes(today)) continue;
+        } else {
+          continue;
+        }
+
+        // Calculate minutes until departure
+        const [hours, minutes] = departureTime.split(':').map(Number);
+        const departureDate = new Date(now);
+        departureDate.setHours(hours, minutes, 0, 0);
+        const minsUntilDeparture = (departureDate.getTime() - now.getTime()) / 60000;
+
+        // Skip if not within our processing window
+        if (minsUntilDeparture < -1 || minsUntilDeparture > 22) continue;
+
+        // Get route card for origin/destination
+        let origin = '';
+        let destination = '';
+        if (alert.routeCardId) {
+          const cardDoc = await getRouteCardsRef(userId).doc(alert.routeCardId).get();
+          if (cardDoc.exists) {
+            const cardData = cardDoc.data()!;
+            origin = cardData.origin || '';
+            destination = cardData.destination || '';
+          }
+        }
+
+        // Load delivery state
+        const deliveryRef = getAlertDeliveryStateRef(userId).doc(scheduleId);
+        const deliveryDoc = await deliveryRef.get();
+        const delivery = deliveryDoc.data() || { sentKeys: [], lastKnownTripState: null };
+        const sentKeys: string[] = delivery.sentKeys || [];
+        const departureIso = departureDate.toISOString().slice(0, 10);
+
+        // ─── Fixed Reminders (20, 15, 10, 5 min) ─────────────────
+        const fixedOffsets: number[] = alert.fixedReminderMinutes || [20, 15, 10, 5];
+
+        for (const offset of fixedOffsets) {
+          if (!isWithinWindow(minsUntilDeparture, offset)) continue;
+
+          const sentKey = `${scheduleId}:${departureIso}:fixed-${offset}`;
+          if (sentKeys.includes(sentKey)) continue;
+
+          // Fetch live train status
+          let train: LiveTrain | null = null;
+          if (apiKey && origin && destination) {
+            train = await fetchLiveTrainStatus(origin, destination, departureTime, apiKey);
+          }
+
+          // Format and send message
+          const message = formatReminderMessage({
+            title: alert.title || 'Train Alert',
+            origin,
+            destination,
+            departureTime,
+            offsetMinutes: offset,
+            train,
+          });
+
+          const sent = await sendMessageWithRetry(botToken, chatId, message);
+          if (sent) {
+            sentKeys.push(sentKey);
+            await deliveryRef.set({
+              sentKeys,
+              lastKnownTripState: train ? {
+                estimatedTime: train.estimatedTime,
+                platform: train.platform,
+                status: train.status,
+              } : delivery.lastKnownTripState,
+            }, { merge: true });
+          }
+        }
+
+        // ─── Change Checks (18, 13 min) ──────────────────────────
+        const changeOffsets: number[] = alert.changeCheckMinutes || [18, 13];
+
+        for (const offset of changeOffsets) {
+          if (!isWithinWindow(minsUntilDeparture, offset)) continue;
+          if (!apiKey || !origin || !destination) continue;
+
+          const train = await fetchLiveTrainStatus(origin, destination, departureTime, apiKey);
+          if (!train) continue;
+
+          const lastState = delivery.lastKnownTripState;
+          if (!lastState) {
+            // First check — store state, don't send message
+            await deliveryRef.set({ sentKeys, lastKnownTripState: { estimatedTime: train.estimatedTime, platform: train.platform, status: train.status } }, { merge: true });
+            continue;
+          }
+
+          // Detect changes
+          let change = '';
+          if (train.cancelled && lastState.status !== 'cancelled') {
+            change = `❌ <b>Train CANCELLED</b>\nCheck the app for alternative services.`;
+          } else if (train.status === 'delayed' && lastState.status !== 'delayed') {
+            change = `⚠️ Train now <b>${train.delayMinutes || '?'} min late</b>`;
+          } else if (train.platform && train.platform !== lastState.platform && lastState.platform) {
+            change = `📍 Platform changed: ${lastState.platform} → <b>${train.platform}</b>`;
+          }
+
+          if (!change) continue;
+
+          const changeSentKey = `${scheduleId}:${departureIso}:change-${offset}:${train.status}-${train.platform}`;
+          if (sentKeys.includes(changeSentKey)) continue;
+
+          const message = formatChangeMessage({
+            title: alert.title || 'Train Alert',
+            origin,
+            destination,
+            departureTime,
+            change,
+            train,
+          });
+
+          const sent = await sendMessageWithRetry(botToken, chatId, message);
+          if (sent) {
+            sentKeys.push(changeSentKey);
+            await deliveryRef.set({
+              sentKeys,
+              lastKnownTripState: { estimatedTime: train.estimatedTime, platform: train.platform, status: train.status },
+            }, { merge: true });
+          }
+        }
+      }
+    }
+
+    return { statusCode: 200, body: JSON.stringify({ ok: true }) };
+  } catch (error) {
+    console.error('Alert scheduler error:', error);
+    return { statusCode: 500, body: JSON.stringify({ error: 'Scheduler failed' }) };
+  }
+};
+
+// Run every minute
+export const handler = schedule('* * * * *', schedulerHandler);
