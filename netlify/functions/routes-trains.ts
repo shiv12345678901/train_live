@@ -79,36 +79,40 @@ const handler: Handler = async (event) => {
 
       if (events.length > 0) {
         const departures: TrainDeparture[] = [];
+        const seenTrips = new Set<string>(); // Deduplicate by tripId + scheduledTime
         const destLower = destination.toLowerCase().replace(/\s*station\s*/gi, '').trim();
 
-        for (const stopEvent of events.slice(0, 40)) {
+        for (const stopEvent of events.slice(0, 60)) {
           const transportation = (stopEvent.transportation || {}) as Record<string, unknown>;
           const line = (transportation.disassembledName || transportation.number || '') as string;
           const product = (transportation.product || {}) as Record<string, unknown>;
           const productClass = product.class as number || 0;
+          const productName = ((product.name as string) || '').toLowerCase();
           
-          // Determine transport type from product class
-          // TfNSW classes: 1=train, 2=metro, 5=bus, 4=light rail, 9=ferry
+          // Determine transport type from product class AND name
+          // TfNSW product classes vary — use name as fallback
           let transportType: TrainDeparture['transportType'] = 'train';
-          if (productClass === 5 || productClass === 7) transportType = 'bus';
-          else if (productClass === 2) transportType = 'metro';
-          else if (productClass === 4) transportType = 'light_rail';
-          else if (productClass === 9) transportType = 'ferry';
+          if (productClass === 5 || productClass === 7 || productName.includes('bus')) {
+            transportType = 'bus';
+          } else if (productClass === 2 || productName.includes('metro')) {
+            transportType = 'metro';
+          } else if (productClass === 4 || productName.includes('light rail') || line.startsWith('L')) {
+            transportType = 'light_rail';
+          } else if (productClass === 9 || productName.includes('ferry')) {
+            transportType = 'ferry';
+          } else if (productClass === 1 || productName.includes('train') || /^T\d/.test(line)) {
+            transportType = 'train';
+          }
 
           // Get the train's final destination name
           const transportDest = (transportation.destination || {}) as Record<string, string>;
           const destStop = (transportDest.name || '').toLowerCase();
           
-          // Accept train if:
-          // 1. Its destination contains our target (exact match)
-          // 2. Its destination route goes "via" our target
-          // 3. Our target is a major city station and train goes toward the city
-          //    (trains to Bondi Junction, City, Central all stop at Redfern)
+          // Accept if destination matches target
           const destContainsTarget = destStop.includes(destLower) || destLower.includes(destStop.replace(/\s*station\s*/gi, '').trim());
           const viaTarget = destStop.includes('via') && destStop.includes(destLower);
           
-          // City-bound heuristic: if user wants Redfern/Central/Town Hall etc,
-          // accept any train heading cityward (Bondi Junction, Central, City Circle stations)
+          // City-bound heuristic
           const cityStations = ['central', 'town hall', 'wynyard', 'circular quay', 'martin place', 'st james', 'museum', 'redfern', 'bondi junction', 'kings cross', 'edgecliff'];
           const targetIsCity = cityStations.some(s => destLower.includes(s));
           const trainGoesCity = cityStations.some(s => destStop.includes(s));
@@ -122,6 +126,12 @@ const handler: Handler = async (event) => {
           const locationProps = (location.properties || {}) as Record<string, string>;
           const platform = locationProps.platform || '';
           const isCancelled = stopEvent.isCancelled === true;
+          const tripId = (transportation.id as string) || '';
+
+          // Deduplicate: skip if same trip+time already seen
+          const dedupeKey = `${tripId}:${scheduledTime}`;
+          if (seenTrips.has(dedupeKey)) continue;
+          seenTrips.add(dedupeKey);
 
           let status: TrainDeparture['status'] = 'unknown';
           let delayMinutes: number | undefined;
@@ -137,7 +147,7 @@ const handler: Handler = async (event) => {
           }
 
           departures.push({
-            tripId: (transportation.id as string) || `trip-${departures.length}`,
+            tripId: tripId || `trip-${departures.length}`,
             route: line,
             platform,
             scheduledTime,
@@ -151,7 +161,7 @@ const handler: Handler = async (event) => {
         }
 
         departures.sort((a, b) => new Date(a.scheduledTime).getTime() - new Date(b.scheduledTime).getTime());
-        return { statusCode: 200, body: JSON.stringify(departures.slice(0, 5)) };
+        return { statusCode: 200, body: JSON.stringify(departures.slice(0, 20)) };
       }
     }
 
@@ -226,7 +236,7 @@ const handler: Handler = async (event) => {
     }
 
     departures.sort((a, b) => new Date(a.scheduledTime).getTime() - new Date(b.scheduledTime).getTime());
-    return { statusCode: 200, body: JSON.stringify(departures.slice(0, 5)) };
+    return { statusCode: 200, body: JSON.stringify(departures.slice(0, 20)) };
   } catch (error) {
     const msg = error instanceof Error ? error.message : 'Unknown error';
     return { statusCode: 500, body: JSON.stringify({ error: 'Failed to fetch live trains', detail: msg }) };
@@ -274,7 +284,7 @@ async function fallbackDepartureMon(apiKey: string, origin: string, destination:
   }
 
   departures.sort((a, b) => new Date(a.scheduledTime).getTime() - new Date(b.scheduledTime).getTime());
-  return { statusCode: 200, body: JSON.stringify(departures.slice(0, 5)) };
+  return { statusCode: 200, body: JSON.stringify(departures.slice(0, 20)) };
 }
 
 export { handler };
