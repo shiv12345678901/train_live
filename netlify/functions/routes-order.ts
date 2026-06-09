@@ -1,5 +1,6 @@
 import type { Handler } from '@netlify/functions';
-import { db, getRouteCardsRef } from '../../lib/firestore';
+import { getDb, getRouteCardsRef } from '../../lib/firestore';
+import { parseJsonObject } from '../../lib/validation';
 
 const handler: Handler = async (event) => {
   if (event.httpMethod !== 'PUT') {
@@ -9,17 +10,17 @@ const handler: Handler = async (event) => {
   const userId = event.headers['x-user-id'] || 'default-user';
 
   try {
-    const body = JSON.parse(event.body || '{}');
+    const body = parseJsonObject(event.body);
     const { orderedIds } = body;
 
-    if (!Array.isArray(orderedIds) || orderedIds.length === 0) {
+    if (!Array.isArray(orderedIds) || orderedIds.length === 0 || !orderedIds.every((id) => typeof id === 'string')) {
       return {
         statusCode: 400,
         body: JSON.stringify({ error: 'orderedIds array is required' }),
       };
     }
 
-    const batch = db.batch();
+    const batch = getDb().batch();
     const collectionRef = getRouteCardsRef(userId);
 
     orderedIds.forEach((id: string, index: number) => {
@@ -34,7 +35,8 @@ const handler: Handler = async (event) => {
       body: JSON.stringify({ success: true, orderedIds }),
     };
   } catch (error) {
-    return { statusCode: 500, body: JSON.stringify({ error: 'Failed to update route order' }) };
+    const message = error instanceof Error ? error.message : 'Failed to update route order';
+    return { statusCode: 400, body: JSON.stringify({ error: message }) };
   }
 };
 

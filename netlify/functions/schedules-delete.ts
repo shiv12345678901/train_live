@@ -25,7 +25,8 @@ const handler: Handler = async (event) => {
       body: JSON.stringify({ success: true, id }),
     };
   } catch (error) {
-    return { statusCode: 500, body: JSON.stringify({ error: 'Failed to delete alert schedule' }) };
+    const message = error instanceof Error ? error.message : 'Failed to delete alert schedule';
+    return { statusCode: 500, body: JSON.stringify({ error: message }) };
   }
 };
 

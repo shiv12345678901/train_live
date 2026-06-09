@@ -1,4 +1,5 @@
 import type { Handler } from '@netlify/functions';
+import { fetchWithTimeout } from '../../lib/http';
 
 interface StopInfo {
   name: string;
@@ -33,7 +34,7 @@ const handler: Handler = async (event) => {
     let stopId = originStopId;
     if (!stopId) {
       const sfUrl = `https://api.transport.nsw.gov.au/v1/tp/stop_finder?outputFormat=rapidJSON&type_sf=any&name_sf=${encodeURIComponent(origin)}&TfNSWSF=true&version=10.2.1.42`;
-      const sfRes = await fetch(sfUrl, { headers: { 'Authorization': `apikey ${apiKey}` } });
+      const sfRes = await fetchWithTimeout(sfUrl, { headers: { 'Authorization': `apikey ${apiKey}` } });
       if (sfRes.ok) {
         const sfData = (await sfRes.json()) as Record<string, unknown>;
         const locations = (sfData?.locations || []) as Array<Record<string, unknown>>;
@@ -54,7 +55,7 @@ const handler: Handler = async (event) => {
     // The key parameter is &TfNSWDM=true which returns previous/onward calls
     const dmUrl = `https://api.transport.nsw.gov.au/v1/tp/departure_mon?outputFormat=rapidJSON&coordOutputFormat=EPSG%3A4326&mode=direct&type_dm=stop&name_dm=${stopId}&departureMonitorMacro=true&TfNSWDM=true&version=10.2.1.42`;
 
-    const dmRes = await fetch(dmUrl, { headers: { 'Authorization': `apikey ${apiKey}` } });
+    const dmRes = await fetchWithTimeout(dmUrl, { headers: { 'Authorization': `apikey ${apiKey}` } });
     if (!dmRes.ok) {
       return { statusCode: 200, body: JSON.stringify({ stops: [] }) };
     }

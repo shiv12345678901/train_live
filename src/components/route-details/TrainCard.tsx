@@ -1,4 +1,5 @@
 import type { TrainDeparture } from '@/types';
+import { getTransportMode } from './transportMode';
 
 interface TrainCardProps {
   train: TrainDeparture;
@@ -19,15 +20,6 @@ function formatTime(isoTime: string): string {
 
 function getMinutesUntil(isoTime: string): number {
   return Math.round((new Date(isoTime).getTime() - Date.now()) / 60000);
-}
-
-function getTransportMode(route: string): string {
-  const r = route.toLowerCase();
-  if (r.startsWith('m') && /^m\d/.test(r)) return 'metro';
-  if (r.startsWith('l') && /^l\d/.test(r)) return 'light_rail';
-  if (r.startsWith('f') && /^f\d/.test(r)) return 'ferry';
-  if (/^\d+$/.test(r) || r.startsWith('bus')) return 'bus';
-  return 'train';
 }
 
 function TransportIcon({ mode }: { mode: string }) {
@@ -199,5 +191,3 @@ export function ModeFilter({ trains, activeFilter, onFilter }: ModeFilterProps) 
     </div>
   );
 }
-
-export { getTransportMode };

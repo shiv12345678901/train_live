@@ -102,6 +102,13 @@ export function removePendingOp(opId: string): void {
   write(KEYS.pendingOps, ops);
 }
 
+export function updatePendingOp(opId: string, updates: Partial<PendingOp>): void {
+  const ops = getPendingOps().map((op) =>
+    op.id === opId ? { ...op, ...updates } : op
+  );
+  write(KEYS.pendingOps, ops);
+}
+
 export function clearPendingOps(): void {
   write(KEYS.pendingOps, []);
 }

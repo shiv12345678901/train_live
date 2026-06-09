@@ -1,4 +1,6 @@
 import type { Handler } from '@netlify/functions';
+import { fetchWithTimeout } from '../../lib/http';
+import { detectTransportType, getTimingStatus, matchesDestination } from '../../lib/trainParsing';
 
 interface TrainDeparture {
   tripId: string;
@@ -25,8 +27,8 @@ const handler: Handler = async (event) => {
 
   try {
     // Get origin/destination from query params (sent by frontend)
-    let origin = event.queryStringParameters?.origin || '';
-    let destination = event.queryStringParameters?.destination || '';
+    const origin = event.queryStringParameters?.origin || '';
+    const destination = event.queryStringParameters?.destination || '';
     const originStopId = event.queryStringParameters?.originStopId || '';
 
     if (!origin || !destination) {
@@ -35,7 +37,7 @@ const handler: Handler = async (event) => {
 
     const apiKey = process.env.TFN_API_KEY;
     if (!apiKey) {
-      return { statusCode: 200, body: JSON.stringify([]) };
+      return { statusCode: 503, body: JSON.stringify({ error: 'TFN_API_KEY is not configured' }) };
     }
 
     // Use stop ID if available, otherwise try to resolve station name
@@ -46,7 +48,7 @@ const handler: Handler = async (event) => {
       // Try resolving the station name to an ID via stop finder
       const sfUrl = `https://api.transport.nsw.gov.au/v1/tp/stop_finder?outputFormat=rapidJSON&type_sf=any&name_sf=${encodeURIComponent(origin)}&coordOutputFormat=EPSG%3A4326&TfNSWSF=true&version=10.2.1.42`;
       try {
-        const sfRes = await fetch(sfUrl, { headers: { 'Authorization': `apikey ${apiKey}` } });
+        const sfRes = await fetchWithTimeout(sfUrl, { headers: { 'Authorization': `apikey ${apiKey}` } });
         if (sfRes.ok) {
           const sfData = (await sfRes.json()) as Record<string, unknown>;
           const locations = (sfData?.locations || []) as Array<Record<string, unknown>>;
@@ -69,7 +71,7 @@ const handler: Handler = async (event) => {
     // Departure monitor - request up to 90 min of departures with limit=40
     const dmUrl = `https://api.transport.nsw.gov.au/v1/tp/departure_mon?outputFormat=rapidJSON&coordOutputFormat=EPSG%3A4326&mode=direct&type_dm=${dmType}&name_dm=${encodeURIComponent(dmName)}&departureMonitorMacro=true&TfNSWDM=true&version=10.2.1.42&limit=40`;
 
-    const dmResponse = await fetch(dmUrl, {
+    const dmResponse = await fetchWithTimeout(dmUrl, {
       headers: { 'Authorization': `apikey ${apiKey}` },
     });
 
@@ -80,45 +82,20 @@ const handler: Handler = async (event) => {
       if (events.length > 0) {
         const departures: TrainDeparture[] = [];
         const seenTrips = new Set<string>(); // Deduplicate by tripId + scheduledTime
-        const destLower = destination.toLowerCase().replace(/\s*station\s*/gi, '').trim();
-
         for (const stopEvent of events.slice(0, 80)) {
           const transportation = (stopEvent.transportation || {}) as Record<string, unknown>;
           const line = (transportation.disassembledName || transportation.number || '') as string;
           const product = (transportation.product || {}) as Record<string, unknown>;
           const productClass = product.class as number || 0;
-          const productName = ((product.name as string) || '').toLowerCase();
-          
-          // Determine transport type from product class AND name
-          // TfNSW product classes vary — use name as fallback
-          let transportType: TrainDeparture['transportType'] = 'train';
-          if (productClass === 5 || productClass === 7 || productName.includes('bus')) {
-            transportType = 'bus';
-          } else if (productClass === 2 || productName.includes('metro')) {
-            transportType = 'metro';
-          } else if (productClass === 4 || productName.includes('light rail') || line.startsWith('L')) {
-            transportType = 'light_rail';
-          } else if (productClass === 9 || productName.includes('ferry')) {
-            transportType = 'ferry';
-          } else if (productClass === 1 || productName.includes('train') || /^T\d/.test(line)) {
-            transportType = 'train';
-          }
+          const productName = (product.name as string) || '';
+          const transportType = detectTransportType(productClass, productName, line);
 
           // Get the train's final destination name
           const transportDest = (transportation.destination || {}) as Record<string, string>;
           const destStop = (transportDest.name || '').toLowerCase();
           
           // Accept if destination matches target
-          const destContainsTarget = destStop.includes(destLower) || destLower.includes(destStop.replace(/\s*station\s*/gi, '').trim());
-          const viaTarget = destStop.includes('via') && destStop.includes(destLower);
-          
-          // City-bound heuristic
-          const cityStations = ['central', 'town hall', 'wynyard', 'circular quay', 'martin place', 'st james', 'museum', 'redfern', 'bondi junction', 'kings cross', 'edgecliff'];
-          const targetIsCity = cityStations.some(s => destLower.includes(s));
-          const trainGoesCity = cityStations.some(s => destStop.includes(s));
-          const cityMatch = targetIsCity && trainGoesCity;
-
-          if (!destContainsTarget && !viaTarget && !cityMatch) continue;
+          if (!matchesDestination(destStop, destination)) continue;
 
           const scheduledTime = (stopEvent.departureTimePlanned as string) || '';
           const estimatedTime = (stopEvent.departureTimeEstimated as string) || undefined;
@@ -133,18 +110,7 @@ const handler: Handler = async (event) => {
           if (seenTrips.has(dedupeKey)) continue;
           seenTrips.add(dedupeKey);
 
-          let status: TrainDeparture['status'] = 'unknown';
-          let delayMinutes: number | undefined;
-
-          if (isCancelled) {
-            status = 'cancelled';
-          } else if (estimatedTime && scheduledTime) {
-            const diff = (new Date(estimatedTime).getTime() - new Date(scheduledTime).getTime()) / 60000;
-            if (diff <= 1) status = 'on-time';
-            else { status = 'delayed'; delayMinutes = Math.round(diff); }
-          } else if (scheduledTime) {
-            status = 'on-time';
-          }
+          const { status, delayMinutes } = getTimingStatus(scheduledTime, estimatedTime, isCancelled);
 
           departures.push({
             tripId: tripId || `trip-${departures.length}`,
@@ -168,7 +134,7 @@ const handler: Handler = async (event) => {
     // Fallback: try Trip Planner API
     const tripUrl = `https://api.transport.nsw.gov.au/v1/tp/trip?outputFormat=rapidJSON&coordOutputFormat=EPSG%3A4326&depArrMacro=dep&type_origin=any&name_origin=${encodeURIComponent(origin)}&type_destination=any&name_destination=${encodeURIComponent(destination)}&calcNumberOfTrips=6&TfNSWTR=true&version=10.2.1.42`;
 
-    const tripResponse = await fetch(tripUrl, {
+    const tripResponse = await fetchWithTimeout(tripUrl, {
       headers: { 'Authorization': `apikey ${apiKey}` },
     });
 
@@ -215,24 +181,11 @@ const handler: Handler = async (event) => {
         if (!stopsAtDest) continue;
       }
 
-      let status: TrainDeparture['status'] = 'unknown';
-      let delayMinutes: number | undefined;
+      const { status, delayMinutes } = getTimingStatus(scheduledTime, estimatedTime, isCancelled);
 
-      if (isCancelled) {
-        status = 'cancelled';
-      } else if (estimatedTime && scheduledTime) {
-        const diff = (new Date(estimatedTime).getTime() - new Date(scheduledTime).getTime()) / 60000;
-        if (diff <= 1) {
-          status = 'on-time';
-        } else {
-          status = 'delayed';
-          delayMinutes = Math.round(diff);
-        }
-      } else if (scheduledTime) {
-        status = 'on-time';
-      }
-
-      departures.push({ tripId, route: line, platform, scheduledTime, estimatedTime, status, delayMinutes, cancelled: isCancelled, transportType: 'train', alerts: [] });
+      const productClass = product.class as number || 0;
+      const productName = (product.name as string) || '';
+      departures.push({ tripId, route: line, platform, scheduledTime, estimatedTime, status, delayMinutes, cancelled: isCancelled, transportType: detectTransportType(productClass, productName, line), alerts: [] });
     }
 
     departures.sort((a, b) => new Date(a.scheduledTime).getTime() - new Date(b.scheduledTime).getTime());
@@ -246,7 +199,7 @@ const handler: Handler = async (event) => {
 async function fallbackDepartureMon(apiKey: string, origin: string, destination: string) {
   const apiUrl = `https://api.transport.nsw.gov.au/v1/tp/departure_mon?outputFormat=rapidJSON&coordOutputFormat=EPSG%3A4326&mode=direct&type_dm=stop&name_dm=${encodeURIComponent(origin)}&departureMonitorMacro=true&TfNSWDM=true&version=10.2.1.42`;
 
-  const response = await fetch(apiUrl, { headers: { 'Authorization': `apikey ${apiKey}` } });
+  const response = await fetchWithTimeout(apiUrl, { headers: { 'Authorization': `apikey ${apiKey}` } });
   if (!response.ok) {
     return { statusCode: 200, body: JSON.stringify([]) };
   }
@@ -260,7 +213,7 @@ async function fallbackDepartureMon(apiKey: string, origin: string, destination:
     const line = (transportation.disassembledName || transportation.number || '') as string;
     const transportDest = (transportation.destination || {}) as Record<string, string>;
     const destStop = transportDest.name || '';
-    if (!destStop.toLowerCase().includes(destination.toLowerCase())) continue;
+    if (!matchesDestination(destStop, destination)) continue;
 
     const scheduledTime = (stopEvent.departureTimePlanned as string) || '';
     const estimatedTime = (stopEvent.departureTimeEstimated as string) || undefined;
@@ -269,18 +222,12 @@ async function fallbackDepartureMon(apiKey: string, origin: string, destination:
     const platform = locationProps.platform || '';
     const isCancelled = stopEvent.isCancelled === true;
 
-    let status: TrainDeparture['status'] = 'unknown';
-    let delayMinutes: number | undefined;
+    const product = (transportation.product || {}) as Record<string, unknown>;
+    const productClass = product.class as number || 0;
+    const productName = (product.name as string) || '';
+    const { status, delayMinutes } = getTimingStatus(scheduledTime, estimatedTime, isCancelled);
 
-    if (isCancelled) {
-      status = 'cancelled';
-    } else if (estimatedTime && scheduledTime) {
-      const diff = (new Date(estimatedTime).getTime() - new Date(scheduledTime).getTime()) / 60000;
-      if (diff <= 1) status = 'on-time';
-      else { status = 'delayed'; delayMinutes = Math.round(diff); }
-    }
-
-    departures.push({ tripId: (transportation.id as string) || `trip-${departures.length}`, route: line, platform, scheduledTime, estimatedTime, status, delayMinutes, cancelled: isCancelled, transportType: 'train', alerts: [] });
+    departures.push({ tripId: (transportation.id as string) || `trip-${departures.length}`, route: line, platform, scheduledTime, estimatedTime, status, delayMinutes, cancelled: isCancelled, transportType: detectTransportType(productClass, productName, line), alerts: [] });
   }
 
   departures.sort((a, b) => new Date(a.scheduledTime).getTime() - new Date(b.scheduledTime).getTime());

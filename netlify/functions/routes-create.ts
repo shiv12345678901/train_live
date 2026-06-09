@@ -1,5 +1,6 @@
 import type { Handler } from '@netlify/functions';
 import { getRouteCardsRef } from '../../lib/firestore';
+import { parseJsonObject, routeCreateData } from '../../lib/validation';
 
 const handler: Handler = async (event) => {
   if (event.httpMethod !== 'POST') {
@@ -9,24 +10,7 @@ const handler: Handler = async (event) => {
   const userId = event.headers['x-user-id'] || 'default-user';
 
   try {
-    const body = JSON.parse(event.body || '{}');
-    const { title, origin, destination, routeFilter } = body;
-
-    // Validate required fields
-    if (!title || !origin || !destination) {
-      return {
-        statusCode: 400,
-        body: JSON.stringify({ error: 'title, origin, and destination are required' }),
-      };
-    }
-
-    // Validate origin ≠ destination
-    if (origin === destination) {
-      return {
-        statusCode: 400,
-        body: JSON.stringify({ error: 'origin and destination must be different' }),
-      };
-    }
+    const route = routeCreateData(parseJsonObject(event.body));
 
     // Determine the next order value
     const snapshot = await getRouteCardsRef(userId).orderBy('order', 'desc').limit(1).get();
@@ -34,10 +18,7 @@ const handler: Handler = async (event) => {
 
     const now = new Date().toISOString();
     const docData = {
-      title,
-      origin,
-      destination,
-      routeFilter: routeFilter || [],
+      ...route,
       order: maxOrder + 1,
       enabled: true,
       createdAt: now,
@@ -52,7 +33,7 @@ const handler: Handler = async (event) => {
     };
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
-    return { statusCode: 500, body: JSON.stringify({ error: 'Failed to create route card', detail: msg }) };
+    return { statusCode: 400, body: JSON.stringify({ error: msg }) };
   }
 };
 

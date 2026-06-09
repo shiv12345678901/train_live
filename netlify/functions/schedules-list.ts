@@ -13,7 +13,8 @@ const handler: Handler = async (event) => {
     const schedules = snapshot.docs.map((doc: FirebaseFirestore.QueryDocumentSnapshot) => ({ id: doc.id, ...doc.data() }));
     return { statusCode: 200, body: JSON.stringify(schedules) };
   } catch (error) {
-    return { statusCode: 500, body: JSON.stringify({ error: 'Failed to fetch alert schedules' }) };
+    const message = error instanceof Error ? error.message : 'Failed to fetch alert schedules';
+    return { statusCode: 500, body: JSON.stringify({ error: message }) };
   }
 };
 

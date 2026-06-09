@@ -17,18 +17,12 @@ export function ScheduleScreen() {
     setPendingAlertPrefill,
     settings,
   } = useAppStore();
-  const [showForm, setShowForm] = useState(false);
+  const [showForm, setShowForm] = useState(Boolean(pendingAlertPrefill));
 
   useEffect(() => {
     loadAlertSchedules();
     loadRouteCards();
   }, [loadAlertSchedules, loadRouteCards]);
-
-  useEffect(() => {
-    if (pendingAlertPrefill) {
-      setShowForm(true);
-    }
-  }, [pendingAlertPrefill]);
 
   const handleSave = async (formData: AlertFormData) => {
     await saveAlertSchedule({

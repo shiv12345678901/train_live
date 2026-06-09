@@ -1,8 +1,8 @@
 export async function handler() {
   const key = process.env.FIREBASE_SERVICE_ACCOUNT_KEY || '';
   
-  let status = 'unknown';
-  let detail = '';
+  let status: string;
+  let detail: string;
   
   if (!key) {
     status = 'missing';

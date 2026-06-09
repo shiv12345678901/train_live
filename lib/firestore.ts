@@ -13,6 +13,11 @@ try {
 
 export { db };
 
+export function getDb() {
+  if (!db) throw new Error('Firestore not initialized');
+  return db;
+}
+
 export function getRouteCardsRef(userId: string) {
   if (!db) throw new Error('Firestore not initialized');
   return db.collection('users').doc(userId).collection('routeCards');

@@ -1,5 +1,6 @@
 import type { Handler } from '@netlify/functions';
 import { getRouteCardsRef } from '../../lib/firestore';
+import { parseJsonObject, routeUpdates } from '../../lib/validation';
 
 const handler: Handler = async (event) => {
   if (event.httpMethod !== 'PUT') {
@@ -14,14 +15,10 @@ const handler: Handler = async (event) => {
   }
 
   try {
-    const body = JSON.parse(event.body || '{}');
     const updates = {
-      ...body,
+      ...routeUpdates(parseJsonObject(event.body)),
       updatedAt: new Date().toISOString(),
     };
-
-    // Remove id from updates if present (should not overwrite doc ID)
-    delete updates.id;
 
     const docRef = getRouteCardsRef(userId).doc(id);
     await docRef.update(updates);
@@ -32,7 +29,8 @@ const handler: Handler = async (event) => {
       body: JSON.stringify({ id: updated.id, ...updated.data() }),
     };
   } catch (error) {
-    return { statusCode: 500, body: JSON.stringify({ error: 'Failed to update route card' }) };
+    const message = error instanceof Error ? error.message : 'Failed to update route card';
+    return { statusCode: 400, body: JSON.stringify({ error: message }) };
   }
 };
 

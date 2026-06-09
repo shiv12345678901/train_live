@@ -1,12 +1,15 @@
-import type { Handler, HandlerEvent, HandlerContext } from '@netlify/functions';
+import type { Handler } from '@netlify/functions';
 import { schedule } from '@netlify/functions';
+import { FieldValue } from 'firebase-admin/firestore';
 import {
-  db,
   getAlertSchedulesRef,
   getAlertDeliveryStateRef,
+  getDb,
   getRouteCardsRef,
   getSettingsRef,
 } from '../../lib/firestore';
+import { fetchWithTimeout } from '../../lib/http';
+import { getTimingStatus } from '../../lib/trainParsing';
 import { sendMessageWithRetry } from '../../lib/telegram';
 
 // ─── Helpers ────────────────────────────────────────────────────────
@@ -44,7 +47,7 @@ async function fetchLiveTrainStatus(
     // Use Trip Planner to find trains between origin and destination
     const url = `https://api.transport.nsw.gov.au/v1/tp/trip?outputFormat=rapidJSON&coordOutputFormat=EPSG%3A4326&depArrMacro=dep&type_origin=any&name_origin=${encodeURIComponent(origin)}&type_destination=any&name_destination=${encodeURIComponent(destination)}&calcNumberOfTrips=5&TfNSWTR=true&version=10.2.1.42`;
 
-    const res = await fetch(url, { headers: { 'Authorization': `apikey ${apiKey}` } });
+    const res = await fetchWithTimeout(url, { headers: { 'Authorization': `apikey ${apiKey}` } });
     if (!res.ok) return null;
 
     const data = (await res.json()) as Record<string, unknown>;
@@ -81,18 +84,7 @@ async function fetchLiveTrainStatus(
       const line = (transportation.disassembledName || transportation.number || '') as string;
       const isCancelled = leg.isCancelled === true;
 
-      let status = 'on time';
-      let delayMinutes: number | undefined;
-
-      if (isCancelled) {
-        status = 'cancelled';
-      } else if (estimatedTime && scheduledTime) {
-        const diff = (new Date(estimatedTime).getTime() - new Date(scheduledTime).getTime()) / 60000;
-        if (diff > 1) {
-          status = 'delayed';
-          delayMinutes = Math.round(diff);
-        }
-      }
+      const { status, delayMinutes } = getTimingStatus(scheduledTime, estimatedTime, isCancelled);
 
       return { route: line, platform, scheduledTime, estimatedTime, status, delayMinutes, cancelled: isCancelled };
     }
@@ -101,6 +93,41 @@ async function fetchLiveTrainStatus(
   } catch {
     return null;
   }
+}
+
+async function reserveSentKey(userId: string, scheduleId: string, sentKey: string): Promise<boolean> {
+  const deliveryRef = getAlertDeliveryStateRef(userId).doc(scheduleId);
+  return getDb().runTransaction(async (transaction) => {
+    const deliveryDoc = await transaction.get(deliveryRef);
+    const sentKeys = (deliveryDoc.data()?.sentKeys || []) as string[];
+    if (sentKeys.includes(sentKey)) return false;
+
+    transaction.set(deliveryRef, {
+      sentKeys: [...sentKeys, sentKey],
+    }, { merge: true });
+    return true;
+  });
+}
+
+async function releaseSentKey(userId: string, scheduleId: string, sentKey: string): Promise<void> {
+  await getAlertDeliveryStateRef(userId).doc(scheduleId).set({
+    sentKeys: FieldValue.arrayRemove(sentKey),
+  }, { merge: true });
+}
+
+async function updateDeliveryState(
+  userId: string,
+  scheduleId: string,
+  train: LiveTrain | null,
+  fallbackState: unknown
+): Promise<void> {
+  await getAlertDeliveryStateRef(userId).doc(scheduleId).set({
+    lastKnownTripState: train ? {
+      estimatedTime: train.estimatedTime,
+      platform: train.platform,
+      status: train.status,
+    } : fallbackState,
+  }, { merge: true });
 }
 
 // ─── Message Formatting ─────────────────────────────────────────────
@@ -183,11 +210,11 @@ function formatChangeMessage(opts: {
 
 // ─── Main Scheduler ─────────────────────────────────────────────────
 
-const schedulerHandler: Handler = async (_event: HandlerEvent, _context: HandlerContext) => {
+const schedulerHandler: Handler = async () => {
   const apiKey = process.env.TFN_API_KEY;
 
   try {
-    const usersSnapshot = await db.collection('users').get();
+    const usersSnapshot = await getDb().collection('users').get();
 
     for (const userDoc of usersSnapshot.docs) {
       const userId = userDoc.id;
@@ -259,6 +286,7 @@ const schedulerHandler: Handler = async (_event: HandlerEvent, _context: Handler
 
           const sentKey = `${scheduleId}:${departureIso}:fixed-${offset}`;
           if (sentKeys.includes(sentKey)) continue;
+          if (!await reserveSentKey(userId, scheduleId, sentKey)) continue;
 
           // Fetch live train status
           let train: LiveTrain | null = null;
@@ -279,14 +307,9 @@ const schedulerHandler: Handler = async (_event: HandlerEvent, _context: Handler
           const sent = await sendMessageWithRetry(botToken, chatId, message);
           if (sent) {
             sentKeys.push(sentKey);
-            await deliveryRef.set({
-              sentKeys,
-              lastKnownTripState: train ? {
-                estimatedTime: train.estimatedTime,
-                platform: train.platform,
-                status: train.status,
-              } : delivery.lastKnownTripState,
-            }, { merge: true });
+            await updateDeliveryState(userId, scheduleId, train, delivery.lastKnownTripState);
+          } else {
+            await releaseSentKey(userId, scheduleId, sentKey);
           }
         }
 
@@ -321,6 +344,7 @@ const schedulerHandler: Handler = async (_event: HandlerEvent, _context: Handler
 
           const changeSentKey = `${scheduleId}:${departureIso}:change-${offset}:${train.status}-${train.platform}`;
           if (sentKeys.includes(changeSentKey)) continue;
+          if (!await reserveSentKey(userId, scheduleId, changeSentKey)) continue;
 
           const message = formatChangeMessage({
             title: alert.title || 'Train Alert',
@@ -334,10 +358,9 @@ const schedulerHandler: Handler = async (_event: HandlerEvent, _context: Handler
           const sent = await sendMessageWithRetry(botToken, chatId, message);
           if (sent) {
             sentKeys.push(changeSentKey);
-            await deliveryRef.set({
-              sentKeys,
-              lastKnownTripState: { estimatedTime: train.estimatedTime, platform: train.platform, status: train.status },
-            }, { merge: true });
+            await updateDeliveryState(userId, scheduleId, train, delivery.lastKnownTripState);
+          } else {
+            await releaseSentKey(userId, scheduleId, changeSentKey);
           }
         }
       }

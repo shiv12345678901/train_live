@@ -22,12 +22,14 @@ export function HomeScreen() {
     loadRouteCards();
   }, [loadRouteCards]);
 
-  const handleSave = async (data: { title: string; origin: string; destination: string; routeFilter: string[] }) => {
+  const handleSave = async (data: { title: string; origin: string; destination: string; routeFilter: string[]; originStopId?: string; destinationStopId?: string }) => {
     if (editingCard) {
       await updateRouteCard(editingCard.id, {
         title: data.title,
         origin: data.origin,
+        originStopId: data.originStopId,
         destination: data.destination,
+        destinationStopId: data.destinationStopId,
         routeFilter: data.routeFilter,
       });
       setEditingCard(null);
@@ -35,7 +37,9 @@ export function HomeScreen() {
       await saveRouteCard({
         title: data.title,
         origin: data.origin,
+        originStopId: data.originStopId,
         destination: data.destination,
+        destinationStopId: data.destinationStopId,
         routeFilter: data.routeFilter,
         order: routeCards.length,
         enabled: true,

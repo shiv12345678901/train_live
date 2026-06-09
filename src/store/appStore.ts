@@ -3,11 +3,12 @@ import type { RouteCard, TrainDeparture, AlertSchedule, AlertPrefillData, AppSet
 import { fetchRouteCards, createRouteCard, deleteRouteCard as apiDeleteRouteCard, updateRouteOrder, updateRouteCard as apiUpdateRouteCard } from '@/api/routeApi';
 import { fetchLiveTrains as apiFetchLiveTrains } from '@/api/trainApi';
 import { fetchSchedules, createSchedule, updateSchedule, deleteSchedule as apiDeleteSchedule } from '@/api/scheduleApi';
+import { saveSettings } from '@/api/settingsApi';
 import {
   getLocalRouteCards, setLocalRouteCards,
   getLocalAlertSchedules, setLocalAlertSchedules,
   getLocalSettings, setLocalSettings,
-  addPendingOp, getPendingOps, removePendingOp,
+  addPendingOp, getPendingOps, removePendingOp, updatePendingOp,
   setLastSyncTime,
 } from './localStorage';
 
@@ -68,7 +69,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
     // Then try to sync from backend (silently, don't spam console)
     try {
       const remote = await fetchRouteCards();
-      if (remote.length > 0) {
+      if (remote.length > 0 || local.length === 0) {
         set({ routeCards: remote });
         setLocalRouteCards(remote);
         setLastSyncTime();
@@ -156,8 +157,10 @@ export const useAppStore = create<AppState>()((set, get) => ({
     // Remove locally immediately
     set((state) => {
       const updated = state.routeCards.filter((c) => c.id !== id);
+      const updatedSchedules = state.alertSchedules.filter((s) => s.routeCardId !== id);
       setLocalRouteCards(updated);
-      return { routeCards: updated };
+      setLocalAlertSchedules(updatedSchedules);
+      return { routeCards: updated, alertSchedules: updatedSchedules };
     });
 
     // Try backend (skip for local-only items that never synced)
@@ -219,7 +222,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
     // Try to sync from backend
     try {
       const remote = await fetchSchedules();
-      if (remote.length > 0) {
+      if (remote.length > 0 || local.length === 0) {
         set({ alertSchedules: remote });
         setLocalAlertSchedules(remote);
         setLastSyncTime();
@@ -308,12 +311,23 @@ export const useAppStore = create<AppState>()((set, get) => ({
   settings: getLocalSettings(),
 
   updateSettings: async (newSettings) => {
+    let nextSettings: AppSettings;
     set((state) => {
       const updated = { ...state.settings, ...newSettings };
       setLocalSettings(updated);
+      nextSettings = updated;
       return { settings: updated };
     });
-    // Settings sync to backend can be added later
+    try {
+      const saved = await saveSettings(nextSettings!);
+      set((state) => {
+        const merged = { ...state.settings, ...saved };
+        setLocalSettings(merged);
+        return { settings: merged };
+      });
+    } catch {
+      addPendingOp({ type: 'update_settings', payload: { settings: nextSettings! } });
+    }
   },
 
   // ─── Sync Engine ──────────────────────────────────────────────────
@@ -381,11 +395,22 @@ export const useAppStore = create<AppState>()((set, get) => ({
             await apiDeleteSchedule(id);
             break;
           }
+          case 'update_settings': {
+            const { settings } = op.payload as { settings: AppSettings };
+            const saved = await saveSettings(settings);
+            set((state) => {
+              const merged = { ...state.settings, ...saved };
+              setLocalSettings(merged);
+              return { settings: merged };
+            });
+            break;
+          }
         }
         // Operation succeeded — remove from queue
         removePendingOp(op.id);
       } catch {
         // Still failing — leave in queue for next sync attempt
+        updatePendingOp(op.id, { retries: op.retries + 1 });
       }
     }
 
@@ -396,20 +421,14 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   // ─── Auto-sync on app load and when coming back online ──────────────
 
-let syncFailed = false;
-
 if (typeof window !== 'undefined') {
   // Sync pending ops once on app load
   setTimeout(() => {
-    if (!syncFailed) {
-      useAppStore.getState().syncPendingOps().catch(() => { syncFailed = true; });
-    }
+    useAppStore.getState().syncPendingOps().catch(() => undefined);
   }, 5000);
 
-  // Sync when coming back online (only if previous sync didn't fail)
+  // Sync when coming back online
   window.addEventListener('online', () => {
-    if (!syncFailed) {
-      useAppStore.getState().syncPendingOps().catch(() => { syncFailed = true; });
-    }
+    useAppStore.getState().syncPendingOps().catch(() => undefined);
   });
 }

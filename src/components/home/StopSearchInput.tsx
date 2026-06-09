@@ -27,11 +27,6 @@ export function StopSearchInput({ id, label, value, onChange, placeholder }: Sto
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Sync external value changes
-  useEffect(() => {
-    setQuery(value);
-  }, [value]);
-
   // Close dropdown when clicking outside
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {

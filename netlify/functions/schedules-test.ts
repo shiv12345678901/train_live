@@ -1,6 +1,7 @@
 import type { Handler } from '@netlify/functions';
 import { getAlertSchedulesRef, getSettingsRef } from '../../lib/firestore';
 import { sendMessageWithRetry } from '../../lib/telegram';
+import { parseJsonObject } from '../../lib/validation';
 
 const handler: Handler = async (event) => {
   if (event.httpMethod !== 'POST') {
@@ -10,10 +11,10 @@ const handler: Handler = async (event) => {
   const userId = event.headers['x-user-id'] || 'default-user';
 
   try {
-    const body = JSON.parse(event.body || '{}');
+    const body = parseJsonObject(event.body);
     const { scheduleId } = body;
 
-    if (!scheduleId) {
+    if (typeof scheduleId !== 'string' || !scheduleId.trim()) {
       return {
         statusCode: 400,
         body: JSON.stringify({ error: 'scheduleId is required' }),
@@ -21,7 +22,7 @@ const handler: Handler = async (event) => {
     }
 
     // Read the schedule to get route details for the test message
-    const scheduleDoc = await getAlertSchedulesRef(userId).doc(scheduleId).get();
+    const scheduleDoc = await getAlertSchedulesRef(userId).doc(scheduleId.trim()).get();
     if (!scheduleDoc.exists) {
       return {
         statusCode: 404,
@@ -68,7 +69,8 @@ const handler: Handler = async (event) => {
       };
     }
   } catch (error) {
-    return { statusCode: 500, body: JSON.stringify({ error: 'Failed to send test alert' }) };
+    const message = error instanceof Error ? error.message : 'Failed to send test alert';
+    return { statusCode: 500, body: JSON.stringify({ error: message }) };
   }
 };
 

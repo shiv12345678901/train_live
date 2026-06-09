@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { PageHeader } from '@/components/layout/PageHeader';
-import { TrainCard, ModeFilter, getTransportMode } from './TrainCard';
+import { TrainCard, ModeFilter } from './TrainCard';
 import { TrainDetailSheet } from './TrainDetailSheet';
 import { LoadingSkeleton } from './LoadingSkeleton';
 import { InlineError } from './InlineError';
 import { useAppStore } from '@/store/appStore';
 import type { TrainDeparture } from '@/types';
+import { getTransportMode } from './transportMode';
 
 export function RouteDetailsPage() {
   const { id } = useParams<{ id: string }>();
@@ -22,9 +23,9 @@ export function RouteDetailsPage() {
   const trains = id ? liveTrains[id] ?? [] : [];
   const isLoading = id ? liveTrainsLoading[id] ?? false : false;
   const error = id ? liveTrainsError[id] ?? null : null;
-  const [routeFilter, setRouteFilter] = useState<string>('train');
+  const [filterState, setFilterState] = useState({ routeFilter: 'train', visibleCount: 5 });
   const [selectedTrain, setSelectedTrain] = useState<TrainDeparture | null>(null);
-  const [visibleCount, setVisibleCount] = useState(5);
+  const { routeFilter, visibleCount } = filterState;
 
   const filteredTrains = routeFilter === 'all'
     ? trains
@@ -33,11 +34,6 @@ export function RouteDetailsPage() {
   // Show visibleCount results
   const displayTrains = filteredTrains.slice(0, visibleCount);
   const hasMore = filteredTrains.length > visibleCount;
-
-  // Reset visible count when filter changes
-  useEffect(() => {
-    setVisibleCount(5);
-  }, [routeFilter]);
 
   useEffect(() => {
     if (id) {
@@ -60,6 +56,10 @@ export function RouteDetailsPage() {
     navigate('/schedule');
   };
 
+  const handleFilter = (nextFilter: string) => {
+    setFilterState({ routeFilter: nextFilter, visibleCount: 5 });
+  };
+
   if (!card) {
     return (
       <div>
@@ -80,7 +80,7 @@ export function RouteDetailsPage() {
         {isLoading && <LoadingSkeleton />}
         {error && <InlineError message={error} onRetry={() => fetchLiveTrains(id!)} />}
         {!isLoading && !error && trains.length > 0 && (
-          <ModeFilter trains={trains} activeFilter={routeFilter} onFilter={setRouteFilter} />
+          <ModeFilter trains={trains} activeFilter={routeFilter} onFilter={handleFilter} />
         )}
         {!isLoading && !error && trains.length === 0 && (
           <p style={{ color: 'var(--muted)', textAlign: 'center', padding: '24px' }}>No upcoming trains</p>
@@ -96,7 +96,7 @@ export function RouteDetailsPage() {
         {!isLoading && !error && hasMore && (
           <button
             className="btn-secondary load-more-btn"
-            onClick={() => setVisibleCount(prev => prev + 5)}
+            onClick={() => setFilterState((prev) => ({ ...prev, visibleCount: prev.visibleCount + 5 }))}
             type="button"
           >
             Show more

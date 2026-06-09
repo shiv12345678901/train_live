@@ -1,4 +1,5 @@
 import type { Handler } from '@netlify/functions';
+import { fetchWithTimeout } from '../../lib/http';
 
 interface StopResult {
   id: string;
@@ -26,7 +27,7 @@ const handler: Handler = async (event) => {
     // TfNSW Stop Finder API
     const apiUrl = `https://api.transport.nsw.gov.au/v1/tp/stop_finder?outputFormat=rapidJSON&type_sf=any&name_sf=${encodeURIComponent(query.trim())}&coordOutputFormat=EPSG%3A4326&TfNSWSF=true&version=10.2.1.42`;
 
-    const response = await fetch(apiUrl, {
+    const response = await fetchWithTimeout(apiUrl, {
       headers: { 'Authorization': `apikey ${apiKey}` },
     });
 
@@ -67,8 +68,9 @@ const handler: Handler = async (event) => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(stops),
     };
-  } catch (_error) {
-    return { statusCode: 500, body: JSON.stringify({ error: 'Failed to search stops' }) };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to search stops';
+    return { statusCode: 500, body: JSON.stringify({ error: message }) };
   }
 };
 

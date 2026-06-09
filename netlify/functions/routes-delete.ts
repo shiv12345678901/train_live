@@ -1,5 +1,5 @@
 import type { Handler } from '@netlify/functions';
-import { getRouteCardsRef } from '../../lib/firestore';
+import { getAlertDeliveryStateRef, getAlertSchedulesRef, getDb, getRouteCardsRef } from '../../lib/firestore';
 
 const handler: Handler = async (event) => {
   if (event.httpMethod !== 'DELETE') {
@@ -14,13 +14,23 @@ const handler: Handler = async (event) => {
   }
 
   try {
-    await getRouteCardsRef(userId).doc(id).delete();
+    const batch = getDb().batch();
+    batch.delete(getRouteCardsRef(userId).doc(id));
+
+    const schedules = await getAlertSchedulesRef(userId).where('routeCardId', '==', id).get();
+    for (const schedule of schedules.docs) {
+      batch.delete(schedule.ref);
+      batch.delete(getAlertDeliveryStateRef(userId).doc(schedule.id));
+    }
+
+    await batch.commit();
     return {
       statusCode: 200,
-      body: JSON.stringify({ success: true, id }),
+      body: JSON.stringify({ success: true, id, deletedSchedules: schedules.size }),
     };
   } catch (error) {
-    return { statusCode: 500, body: JSON.stringify({ error: 'Failed to delete route card' }) };
+    const message = error instanceof Error ? error.message : 'Failed to delete route card';
+    return { statusCode: 500, body: JSON.stringify({ error: message }) };
   }
 };
 
