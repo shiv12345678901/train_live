@@ -14,7 +14,7 @@ function getGreeting(): string {
 
 export function HomeScreen() {
   const navigate = useNavigate();
-  const { routeCards, alertSchedules, loadRouteCards, reorderRouteCards, saveRouteCard, updateRouteCard, deleteRouteCard } = useAppStore();
+  const { routeCards, alertSchedules, liveTrains, loadRouteCards, reorderRouteCards, saveRouteCard, updateRouteCard, deleteRouteCard } = useAppStore();
   const [showCreation, setShowCreation] = useState(false);
   const [editingCard, setEditingCard] = useState<RouteCardType | null>(null);
 
@@ -74,6 +74,7 @@ export function HomeScreen() {
       <RouteCardGrid
         cards={routeCards}
         alertSchedules={alertSchedules}
+        liveTrains={liveTrains}
         onCardClick={(id) => navigate(`/route/${id}`)}
         onAddNew={() => setShowCreation(true)}
         onReorder={(cardIds) => reorderRouteCards(cardIds)}

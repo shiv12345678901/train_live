@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { TrainCard, ModeFilter } from './TrainCard';
@@ -25,6 +25,7 @@ export function RouteDetailsPage() {
   const error = id ? liveTrainsError[id] ?? null : null;
   const [filterState, setFilterState] = useState({ routeFilter: 'train', visibleCount: 5 });
   const [selectedTrain, setSelectedTrain] = useState<TrainDeparture | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const { routeFilter, visibleCount } = filterState;
 
   const filteredTrains = routeFilter === 'all'
@@ -35,9 +36,15 @@ export function RouteDetailsPage() {
   const displayTrains = filteredTrains.slice(0, visibleCount);
   const hasMore = filteredTrains.length > visibleCount;
 
+  const refreshLiveTrains = useCallback(async () => {
+    if (!id) return;
+    await fetchLiveTrains(id);
+    setLastUpdated(new Date());
+  }, [fetchLiveTrains, id]);
+
   useEffect(() => {
     if (id) {
-      fetchLiveTrains(id);
+      void fetchLiveTrains(id);
     }
   }, [id, fetchLiveTrains]);
 
@@ -60,11 +67,15 @@ export function RouteDetailsPage() {
     setFilterState({ routeFilter: nextFilter, visibleCount: 5 });
   };
 
+  const updatedLabel = lastUpdated
+    ? `Updated ${lastUpdated.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true })}`
+    : 'Live departures';
+
   if (!card) {
     return (
       <div>
         <PageHeader title="Route" backButton />
-        <p style={{ padding: '16px', color: 'var(--muted)' }}>Route not found</p>
+        <p className="route-details-empty">Route not found</p>
       </div>
     );
   }
@@ -73,17 +84,31 @@ export function RouteDetailsPage() {
     <div className="route-details-page">
       <PageHeader title={card.title} backButton />
       <div className="route-details-meta">
-        <span className="route-details-direction">{card.origin} → {card.destination}</span>
-        <span className="route-details-live-badge">Live</span>
+        <div className="route-details-meta-copy">
+          <span className="route-details-direction">{card.origin} → {card.destination}</span>
+          <span className="route-details-freshness">{updatedLabel}</span>
+        </div>
+        <button className="route-details-refresh" type="button" onClick={refreshLiveTrains} aria-label="Refresh live departures">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 12a9 9 0 0 1-15.5 6.2" />
+            <path d="M3 12a9 9 0 0 1 15.5-6.2" />
+            <path d="M18 2v4h-4" />
+            <path d="M6 22v-4h4" />
+          </svg>
+        </button>
       </div>
       <div className="route-details-trains">
         {isLoading && <LoadingSkeleton />}
-        {error && <InlineError message={error} onRetry={() => fetchLiveTrains(id!)} />}
+        {error && <InlineError message={error} onRetry={refreshLiveTrains} />}
         {!isLoading && !error && trains.length > 0 && (
           <ModeFilter trains={trains} activeFilter={routeFilter} onFilter={handleFilter} />
         )}
         {!isLoading && !error && trains.length === 0 && (
-          <p style={{ color: 'var(--muted)', textAlign: 'center', padding: '24px' }}>No upcoming trains</p>
+          <div className="route-details-empty-state">
+            <p className="route-details-empty-title">No services found for this route</p>
+            <p className="route-details-empty-copy">Check the station names or refresh live departures.</p>
+            <button className="btn-secondary route-details-empty-action" type="button" onClick={refreshLiveTrains}>Refresh</button>
+          </div>
         )}
         {!isLoading && !error && displayTrains.map((train) => (
           <TrainCard

@@ -16,13 +16,14 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { RouteCard } from './RouteCard';
 import { AddNewCard } from './AddNewCard';
-import type { RouteCard as RouteCardType, AlertSchedule } from '@/types';
+import type { RouteCard as RouteCardType, AlertSchedule, TrainDeparture } from '@/types';
 
 const ADD_NEW_ID = '__add_new__';
 
 interface RouteCardGridProps {
   cards: RouteCardType[];
   alertSchedules: AlertSchedule[];
+  liveTrains: Record<string, TrainDeparture[]>;
   onCardClick: (cardId: string) => void;
   onAddNew: () => void;
   onReorder: (cardIds: string[]) => void;
@@ -34,12 +35,13 @@ interface SortableRouteCardProps {
   id: string;
   card?: RouteCardType;
   alertStatus: string;
+  nextTrain?: TrainDeparture;
   onClick: () => void;
   onEdit?: () => void;
   onDelete?: () => void;
 }
 
-function SortableRouteCard({ id, card, alertStatus, onClick, onEdit, onDelete }: SortableRouteCardProps) {
+function SortableRouteCard({ id, card, alertStatus, nextTrain, onClick, onEdit, onDelete }: SortableRouteCardProps) {
   const {
     attributes,
     listeners,
@@ -56,7 +58,7 @@ function SortableRouteCard({ id, card, alertStatus, onClick, onEdit, onDelete }:
   return (
     <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
       {card ? (
-        <RouteCard card={card} alertStatus={alertStatus} onClick={onClick} onEdit={onEdit} onDelete={onDelete} />
+        <RouteCard card={card} alertStatus={alertStatus} nextTrain={nextTrain} onClick={onClick} onEdit={onEdit} onDelete={onDelete} />
       ) : (
         <AddNewCard onClick={onClick} />
       )}
@@ -74,6 +76,7 @@ function getAlertStatus(cardId: string, alertSchedules: AlertSchedule[]): string
 export function RouteCardGrid({
   cards,
   alertSchedules,
+  liveTrains,
   onCardClick,
   onAddNew,
   onReorder,
@@ -145,6 +148,7 @@ export function RouteCardGrid({
                 id={card.id}
                 card={card}
                 alertStatus={getAlertStatus(card.id, alertSchedules)}
+                nextTrain={liveTrains[card.id]?.[0]}
                 onClick={() => onCardClick(card.id)}
                 onEdit={onEdit ? () => onEdit(card) : undefined}
                 onDelete={onDelete ? () => onDelete(card) : undefined}

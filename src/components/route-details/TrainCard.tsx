@@ -92,18 +92,24 @@ export function TrainCard({ train, onBellTap, onTap }: TrainCardProps) {
     'changed': { label: 'Changed', class: 'status-changed', dot: '#545454' },
     'unknown': { label: 'Unknown', class: 'status-unknown', dot: '#545454' },
   }[train.status];
+  const handleBellClick = (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    onBellTap?.();
+  };
 
   return (
     <div className={`train-card ${train.cancelled ? 'train-card--cancelled' : ''}`} onClick={onTap} role={onTap ? 'button' : undefined}>
       <div className="train-card-top">
-        {/* Left: mode icon + route badge */}
         <div className="train-card-left">
-          <div className="train-card-mode-icon">
-            <TransportIcon mode={mode} />
-            <span className="train-card-route-badge">{train.route}</span>
+          <div className="train-card-platform-block">
+            <span className="train-card-platform-label">Platform</span>
+            <span className="train-card-platform-number">{platform}</span>
           </div>
           <div className="train-card-meta">
-            <span className="train-card-platform-text">Platform {platform}</span>
+            <span className="train-card-route-line">
+              <TransportIcon mode={mode} />
+              {train.route}
+            </span>
             <span className={`train-card-status-inline`}>
               <svg width="8" height="8" viewBox="0 0 8 8"><circle cx="4" cy="4" r="4" fill={statusConfig.dot} /></svg>
               {statusConfig.label}
@@ -111,7 +117,6 @@ export function TrainCard({ train, onBellTap, onTap }: TrainCardProps) {
           </div>
         </div>
 
-        {/* Right: time + bell */}
         <div className="train-card-right">
           <div className="train-card-time-group">
             {timeStr ? (
@@ -129,7 +134,7 @@ export function TrainCard({ train, onBellTap, onTap }: TrainCardProps) {
             )}
           </div>
           {!train.cancelled && onBellTap && (
-            <button className="train-card-bell-icon" onClick={onBellTap} type="button" aria-label="Set alert">
+            <button className="train-card-bell-icon" onClick={handleBellClick} type="button" aria-label="Set alert">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
                 <path d="M13.73 21a2 2 0 0 1-3.46 0" />

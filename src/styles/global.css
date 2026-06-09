@@ -97,7 +97,7 @@ body {
   transform: translateX(-50%);
   width: 24px;
   height: 3px;
-  background: #4285f4;
+  background: var(--black);
   border-radius: 0 0 3px 3px;
 }
 
@@ -174,14 +174,14 @@ body {
 }
 
 .route-card {
-  --accent-line: #4285f4;
   position: relative;
   display: flex;
   flex-direction: column;
+  gap: 8px;
   padding: 12px;
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: 8px;
   cursor: pointer;
   text-align: left;
   width: 100%;
@@ -189,7 +189,7 @@ body {
   max-height: 140px;
   font-family: inherit;
   overflow: hidden;
-  transition: transform 0.15s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s ease;
+  transition: transform 0.15s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.2s ease, background 0.2s ease;
 }
 
 .route-card * {
@@ -197,7 +197,7 @@ body {
 }
 
 .route-card:hover {
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.06);
+  border-color: var(--text);
 }
 .route-card:active {
   transform: scale(0.96);
@@ -220,7 +220,6 @@ body {
   align-items: center;
   gap: 8px;
   width: 100%;
-  margin-bottom: 4px;
   flex-shrink: 0;
 }
 
@@ -231,6 +230,7 @@ body {
   align-items: center;
   justify-content: center;
   background: var(--panel);
+  border: 1px solid var(--border);
   border-radius: 8px;
   color: var(--text);
   flex-shrink: 0;
@@ -249,21 +249,35 @@ body {
   text-overflow: ellipsis;
 }
 
-/* Active badge */
 .route-card-badge {
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  width: fit-content;
+  margin-top: auto;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
   font-size: 12px;
-  font-weight: 600;
-  color: var(--success);
-  margin-bottom: 4px;
+  font-weight: 700;
+  color: var(--muted);
+  background: var(--panel);
 }
 
 .route-card-badge-dot {
   width: 7px;
   height: 7px;
   border-radius: 50%;
+  background: var(--muted);
+}
+
+.route-card-badge.is-active {
+  color: var(--success);
+  background: #f0fbf4;
+  border-color: #d9f1e0;
+}
+
+.route-card-badge.is-active .route-card-badge-dot {
   background: var(--success);
   animation: badge-pulse 2s ease-in-out infinite;
 }
@@ -311,17 +325,41 @@ body {
   height: 100%;
 }
 
-/* Route text above map */
 .route-card-route {
   font-size: 11px;
   color: var(--muted);
   font-weight: 500;
   line-height: 1.3;
-  margin: 0 0 4px;
+  margin: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   flex-shrink: 0;
+}
+
+.route-card-next {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.route-card-next-label {
+  font-size: 10px;
+  font-weight: 800;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.route-card-next-value {
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--text);
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .route-card-route-row {
@@ -416,7 +454,6 @@ body {
 /* ─── Add New Card ──────────────────────────────────────────────────── */
 
 .add-new-card {
-  --accent-line: #4285f4;
   background: var(--bg);
   border: 1.5px dashed var(--border);
   justify-content: center;
@@ -425,7 +462,7 @@ body {
 }
 
 .add-new-card:hover {
-  border-color: var(--accent-line);
+  border-color: var(--text);
   box-shadow: none;
 }
 
@@ -441,13 +478,14 @@ body {
   align-items: center;
   justify-content: center;
   background: var(--panel);
-  border-radius: 50%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
   margin-bottom: 12px;
   transition: transform 0.2s ease, background 0.2s ease;
 }
 
 .add-new-card:hover .add-new-icon-wrapper {
-  background: #e8f0fe;
+  background: var(--bg);
   transform: scale(1.05);
 }
 
@@ -571,25 +609,80 @@ body {
 .route-details-meta {
   display: flex;
   align-items: center;
-  gap: var(--space-sm);
+  justify-content: space-between;
+  gap: var(--space-md);
   padding: 0 var(--space-lg) var(--space-md);
+}
+
+.route-details-meta-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
 }
 
 .route-details-direction {
   font-size: 14px;
   font-weight: 500;
   color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.route-details-live-badge {
-  font-size: 10px;
+.route-details-freshness {
+  font-size: 12px;
   font-weight: 700;
-  padding: 3px 8px;
-  border-radius: var(--radius-full);
-  background: var(--success);
-  color: var(--white);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  color: var(--text);
+}
+
+.route-details-refresh {
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.route-details-refresh:active {
+  background: var(--panel);
+}
+
+.route-details-empty {
+  padding: 16px;
+  color: var(--muted);
+}
+
+.route-details-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 32px var(--space-lg);
+  text-align: center;
+}
+
+.route-details-empty-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--text);
+}
+
+.route-details-empty-copy {
+  margin: 0;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.route-details-empty-action {
+  margin-top: 8px;
 }
 
 .route-details-trains {
@@ -611,11 +704,15 @@ body {
 
 .train-card {
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  border-radius: 8px;
   padding: 14px 16px;
   background: var(--bg);
   cursor: pointer;
-  transition: background 0.1s ease;
+  transition: background 0.1s ease, border-color 0.15s ease;
+}
+
+.train-card:hover {
+  border-color: var(--text);
 }
 
 .train-card:active {
@@ -639,6 +736,35 @@ body {
   gap: 12px;
   flex: 1;
   min-width: 0;
+}
+
+.train-card-platform-block {
+  width: 54px;
+  height: 54px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.train-card-platform-label {
+  font-size: 9px;
+  font-weight: 800;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.train-card-platform-number {
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--text);
+  line-height: 1;
 }
 
 .train-card-mode-icon {
@@ -668,8 +794,24 @@ body {
 .train-card-meta {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 4px;
   min-width: 0;
+}
+
+.train-card-route-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--text);
+}
+
+.train-card-route-line svg {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
 }
 
 .train-card-platform-text {
@@ -703,10 +845,10 @@ body {
 }
 
 .train-card-time {
-  font-size: 20px;
-  font-weight: 700;
+  font-size: 21px;
+  font-weight: 800;
   color: var(--text);
-  letter-spacing: -0.03em;
+  letter-spacing: 0;
   line-height: 1.1;
 }
 
@@ -735,12 +877,12 @@ body {
   align-items: center;
   justify-content: center;
   border: none;
-  background: var(--panel);
-  border-radius: 50%;
+  background: var(--black);
+  border-radius: 8px;
   cursor: pointer;
-  color: var(--text);
+  color: var(--white);
   flex-shrink: 0;
-  transition: background 0.15s ease;
+  transition: background 0.15s ease, transform 0.15s ease;
 }
 
 .train-card-bell-icon:active {
@@ -753,7 +895,6 @@ body {
 .train-card-bottom,
 .train-card-route,
 .train-card-platform-badge,
-.train-card-platform-number,
 .train-card-status {
   display: none;
 }
@@ -779,7 +920,7 @@ body {
   gap: 5px;
   padding: 7px 14px;
   border: 1.5px solid var(--border);
-  border-radius: var(--radius-full);
+  border-radius: 8px;
   background: var(--bg);
   font-family: inherit;
   font-size: 13px;
@@ -853,6 +994,9 @@ body {
   gap: var(--space-md);
   padding: var(--space-2xl) var(--space-lg);
   text-align: center;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
 }
 
 .inline-error-message {
@@ -864,7 +1008,7 @@ body {
 .inline-error-retry {
   padding: 10px 20px;
   border: none;
-  border-radius: var(--radius-md);
+  border-radius: 8px;
   background: var(--panel);
   font-size: 14px;
   font-weight: 600;
@@ -1349,7 +1493,22 @@ body {
   display: flex;
   flex-direction: column;
   gap: var(--space-xs);
-  padding: var(--space-sm) 0;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.setting-row--button {
+  cursor: pointer;
+}
+
+.setting-row--button:active {
+  background: var(--panel);
+}
+
+.setting-row:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 3px;
+  border-radius: 8px;
 }
 
 .setting-row-header {
@@ -1361,7 +1520,7 @@ body {
 
 .setting-row-label {
   font-size: 15px;
-  font-weight: 600;
+  font-weight: 700;
   color: var(--text);
 }
 
@@ -1375,18 +1534,38 @@ body {
   font-size: 11px;
   font-weight: 700;
   padding: 3px 10px;
-  border-radius: var(--radius-full);
+  border-radius: 8px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
 
 .setting-row-status.connected {
-  background: var(--success);
-  color: var(--white);
+  background: #f0fbf4;
+  color: var(--success);
 }
 
 .setting-row-status.disconnected {
   background: var(--panel);
+  color: var(--muted);
+}
+
+.setting-row-chevron {
+  margin-left: auto;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+.setting-detail-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 0 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.setting-detail-label {
+  font-size: 12px;
+  font-weight: 800;
   color: var(--muted);
 }
 
@@ -1400,11 +1579,10 @@ body {
 .setting-input {
   padding: 14px var(--space-lg);
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  border-radius: 8px;
   font-size: 16px;
   font-family: inherit;
   width: 100%;
-  margin-top: var(--space-xs);
   color: var(--text);
   background: var(--bg);
   transition: border-color 0.15s ease;
@@ -1418,11 +1596,10 @@ body {
 .setting-select {
   padding: 14px var(--space-lg);
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  border-radius: 8px;
   font-size: 16px;
   font-family: inherit;
   width: 100%;
-  margin-top: var(--space-xs);
   background: var(--bg);
   color: var(--text);
   appearance: none;
@@ -1438,7 +1615,7 @@ body {
 }
 
 .setting-save-btn {
-  margin-top: var(--space-lg);
+  margin-top: var(--space-sm);
   width: 100%;
 }
 

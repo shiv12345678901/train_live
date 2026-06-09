@@ -7,6 +7,7 @@ export function SettingsScreen() {
   const { settings, updateSettings } = useAppStore();
   const [botTokenInput, setBotTokenInput] = useState(settings.telegramBotToken ?? '');
   const [chatIdInput, setChatIdInput] = useState(settings.telegramChatId ?? '');
+  const [openPanel, setOpenPanel] = useState<'telegram' | 'timezone' | null>(null);
 
   const handleSaveTelegram = () => {
     updateSettings({
@@ -14,14 +15,11 @@ export function SettingsScreen() {
       telegramChatId: chatIdInput,
       telegramConnected: !!(botTokenInput && chatIdInput),
     });
+    setOpenPanel(null);
   };
 
   const handleTimezoneChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     updateSettings({ timezone: e.target.value });
-  };
-
-  const handleThemeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    updateSettings({ theme: e.target.value as 'light' | 'dark' });
   };
 
   const maskToken = (token: string) => {
@@ -34,96 +32,71 @@ export function SettingsScreen() {
     <div className="settings-screen">
       <PageHeader title="Settings" />
 
-      {/* Telegram Section */}
       <section className="setting-section">
-        <h2 className="setting-section-title">Telegram</h2>
         <SettingRow
-          label="Bot Token"
+          label="Telegram"
+          value={settings.telegramBotToken ? maskToken(settings.telegramBotToken) : 'Add bot token and chat ID'}
           status={settings.telegramConnected ? 'connected' : 'disconnected'}
-        >
-          <input
-            type="password"
-            className="setting-input"
-            placeholder="Enter bot token"
-            value={botTokenInput}
-            onChange={(e) => setBotTokenInput(e.target.value)}
-          />
-          {settings.telegramBotToken && (
-            <span className="setting-row-masked">{maskToken(settings.telegramBotToken)}</span>
-          )}
-        </SettingRow>
-        <SettingRow label="Chat ID">
-          <input
-            type="text"
-            className="setting-input"
-            placeholder="Enter chat ID"
-            value={chatIdInput}
-            onChange={(e) => setChatIdInput(e.target.value)}
-          />
-        </SettingRow>
-        <button className="btn-primary setting-save-btn" onClick={handleSaveTelegram}>
-          Save Telegram Settings
-        </button>
-      </section>
-
-      {/* API Section */}
-      <section className="setting-section">
-        <h2 className="setting-section-title">API</h2>
-        <SettingRow
-          label="API Key"
-          value={settings.apiKey ? 'Configured' : 'Not configured'}
-          status={settings.apiKey ? 'connected' : 'disconnected'}
+          onClick={() => setOpenPanel(openPanel === 'telegram' ? null : 'telegram')}
         />
-      </section>
-
-      {/* Timezone Section */}
-      <section className="setting-section">
-        <h2 className="setting-section-title">Timezone</h2>
-        <SettingRow label="Timezone">
-          <select
-            className="setting-select"
-            value={settings.timezone}
-            onChange={handleTimezoneChange}
-          >
-            <option value={Intl.DateTimeFormat().resolvedOptions().timeZone}>
-              {Intl.DateTimeFormat().resolvedOptions().timeZone} (auto-detected)
-            </option>
-            <option value="Australia/Sydney">Australia/Sydney</option>
-            <option value="Australia/Melbourne">Australia/Melbourne</option>
-            <option value="Australia/Brisbane">Australia/Brisbane</option>
-            <option value="Australia/Perth">Australia/Perth</option>
-            <option value="UTC">UTC</option>
-          </select>
-        </SettingRow>
-      </section>
-
-      {/* Delivery Status Section */}
-      <section className="setting-section">
-        <h2 className="setting-section-title">Delivery Status</h2>
-        <SettingRow label="Last Send" value="—" />
-        <SettingRow label="Error Count" value="0" />
-      </section>
-
-      {/* Theme Section */}
-      <section className="setting-section">
-        <h2 className="setting-section-title">Theme</h2>
-        <SettingRow label="Appearance">
-          <select
-            className="setting-select"
-            value={settings.theme}
-            onChange={handleThemeChange}
-          >
-            <option value="light">Light</option>
-            <option value="dark">Dark (coming soon)</option>
-          </select>
-        </SettingRow>
-      </section>
-
-      {/* About Section */}
-      <section className="setting-section">
-        <h2 className="setting-section-title">About</h2>
-        <SettingRow label="App Version" value="1.0.0" />
-        <SettingRow label="Build" value="2024.1" />
+        {openPanel === 'telegram' && (
+          <div className="setting-detail-panel">
+            <label className="setting-detail-label" htmlFor="telegram-token">Bot token</label>
+            <input
+              id="telegram-token"
+              type="password"
+              className="setting-input"
+              placeholder="Enter bot token"
+              value={botTokenInput}
+              onChange={(e) => setBotTokenInput(e.target.value)}
+            />
+            <label className="setting-detail-label" htmlFor="telegram-chat">Chat ID</label>
+            <input
+              id="telegram-chat"
+              type="text"
+              className="setting-input"
+              placeholder="Enter chat ID"
+              value={chatIdInput}
+              onChange={(e) => setChatIdInput(e.target.value)}
+            />
+            <button className="btn-primary setting-save-btn" onClick={handleSaveTelegram}>
+              Save Telegram
+            </button>
+          </div>
+        )}
+        <SettingRow
+          label="Timezone"
+          value={settings.timezone}
+          onClick={() => setOpenPanel(openPanel === 'timezone' ? null : 'timezone')}
+        />
+        {openPanel === 'timezone' && (
+          <div className="setting-detail-panel">
+            <select
+              className="setting-select"
+              value={settings.timezone}
+              onChange={handleTimezoneChange}
+            >
+              <option value={Intl.DateTimeFormat().resolvedOptions().timeZone}>
+                {Intl.DateTimeFormat().resolvedOptions().timeZone} auto
+              </option>
+              <option value="Australia/Sydney">Australia/Sydney</option>
+              <option value="Australia/Melbourne">Australia/Melbourne</option>
+              <option value="Australia/Brisbane">Australia/Brisbane</option>
+              <option value="Australia/Perth">Australia/Perth</option>
+              <option value="UTC">UTC</option>
+            </select>
+          </div>
+        )}
+        <SettingRow
+          label="Appearance"
+          value="Light"
+          status="none"
+        />
+        <SettingRow
+          label="Data"
+          value="Stored locally and synced in background"
+          status="none"
+        />
       </section>
     </div>
   );

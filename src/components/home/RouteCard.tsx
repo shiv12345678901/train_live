@@ -1,36 +1,31 @@
 import { useState, useRef, useCallback } from 'react';
-import type { RouteCard as RouteCardType } from '@/types';
+import type { RouteCard as RouteCardType, TrainDeparture } from '@/types';
 
 interface RouteCardProps {
   card: RouteCardType;
   alertStatus: string;
+  nextTrain?: TrainDeparture;
   onClick: () => void;
   onEdit?: () => void;
   onDelete?: () => void;
   index?: number;
 }
 
-// Different map tiles for variety (public OSM tiles, Sydney area)
-const MAP_TILES = [
-  'https://tile.openstreetmap.org/14/15125/9832.png',  // Sydney CBD
-  'https://tile.openstreetmap.org/14/15124/9833.png',  // Inner West
-  'https://tile.openstreetmap.org/14/15126/9834.png',  // South
-  'https://tile.openstreetmap.org/14/15123/9831.png',  // Harbour
-  'https://tile.openstreetmap.org/14/15127/9835.png',  // Hurstville area
-  'https://tile.openstreetmap.org/14/15125/9833.png',  // Redfern area
-];
+function formatTime(isoTime: string): string {
+  const date = new Date(isoTime);
+  if (Number.isNaN(date.getTime())) return 'Live time unavailable';
+  return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
+}
 
-// Accent colors for decorative shapes per card
-const ACCENT_COLORS = [
-  '#4285f4', // blue
-  '#34a853', // green
-  '#7c4dff', // purple
-  '#00bcd4', // teal
-  '#ff6d00', // orange
-  '#e91e63', // pink
-];
+function getNextLabel(train?: TrainDeparture): string {
+  if (!train) return 'Tap for live times';
+  const time = formatTime(train.estimatedTime || train.scheduledTime);
+  if (train.cancelled) return `${time} cancelled`;
+  if (train.status === 'delayed' && train.delayMinutes) return `${time} · ${train.delayMinutes} min late`;
+  return `${time} · ${train.status === 'unknown' ? 'Live status unavailable' : 'On time'}`;
+}
 
-export function RouteCard({ card, alertStatus, onClick, onEdit, onDelete, index = 0 }: RouteCardProps) {
+export function RouteCard({ card, alertStatus, nextTrain, onClick, onEdit, onDelete, index = 0 }: RouteCardProps) {
   // Shorten station names aggressively for card display
   const shorten = (name: string) => {
     return name
@@ -42,14 +37,11 @@ export function RouteCard({ card, alertStatus, onClick, onEdit, onDelete, index 
   const shortOrigin = shorten(card.origin);
   const shortDest = shorten(card.destination);
   const isActive = alertStatus === 'Alert set';
+  const nextLabel = getNextLabel(nextTrain);
 
   const [showMenu, setShowMenu] = useState(false);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const didLongPress = useRef(false);
-
-  // Pick map tile and color based on index for visual variety
-  const mapTile = MAP_TILES[index % MAP_TILES.length];
-  const accentColor = ACCENT_COLORS[index % ACCENT_COLORS.length];
 
   const handlePointerDown = useCallback(() => {
     didLongPress.current = false;
@@ -95,45 +87,27 @@ export function RouteCard({ card, alertStatus, onClick, onEdit, onDelete, index 
         onPointerLeave={handlePointerLeave}
         type="button"
       >
-        {/* Top row: icon + title */}
         <div className="route-card-header">
-          <div className="route-card-icon" style={{ background: `${accentColor}12` }}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={accentColor} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <div className="route-card-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <rect x="4" y="10" width="16" height="8" rx="2"/>
               <path d="M4 7a4 4 0 014-4h8a4 4 0 014 4v3H4V7z"/>
-              <circle cx="8" cy="15" r="1.5" fill={accentColor} stroke="none"/>
-              <circle cx="16" cy="15" r="1.5" fill={accentColor} stroke="none"/>
+              <circle cx="8" cy="15" r="1.5" fill="currentColor" stroke="none"/>
+              <circle cx="16" cy="15" r="1.5" fill="currentColor" stroke="none"/>
               <path d="M9 21l1.5-3h3L15 21"/>
             </svg>
           </div>
           <h3 className="route-card-title">{card.title}</h3>
         </div>
 
-        {/* Active badge */}
-        {isActive && (
-          <div className="route-card-badge">
-            <span className="route-card-badge-dot" />
-            Active
-          </div>
-        )}
-
-        {/* Route text */}
         <p className="route-card-route">{shortOrigin} → {shortDest}</p>
-
-        {/* Map area with route line overlay */}
-        <div className="route-card-map">
-          <div className="route-card-map-bg" style={{ backgroundImage: `url('${mapTile}')` }} />
-          {/* Decorative accent shape */}
-          <svg className="route-card-map-shape" viewBox="0 0 160 56" fill="none" preserveAspectRatio="none">
-            <circle cx="130" cy="45" r="18" fill={accentColor} opacity="0.08"/>
-            <circle cx="25" cy="12" r="10" fill={accentColor} opacity="0.06"/>
-          </svg>
-          {/* Route line */}
-          <svg className="route-card-map-line" viewBox="0 0 160 56" fill="none" preserveAspectRatio="xMidYMid meet">
-            <path d="M12 42 Q40 42 65 28 Q90 14 120 22 Q140 27 148 18" stroke={accentColor} strokeWidth="3" strokeLinecap="round" fill="none"/>
-            <circle cx="12" cy="42" r="5" fill={accentColor}/>
-            <circle cx="148" cy="18" r="4.5" fill="white" stroke={accentColor} strokeWidth="2.5"/>
-          </svg>
+        <div className="route-card-next">
+          <span className="route-card-next-label">Next</span>
+          <span className="route-card-next-value">{nextLabel}</span>
+        </div>
+        <div className={`route-card-badge ${isActive ? 'is-active' : ''}`}>
+          <span className="route-card-badge-dot" />
+          {alertStatus}
         </div>
       </button>
 
