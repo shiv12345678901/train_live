@@ -99,8 +99,13 @@ export function RouteDetailsPage() {
             onClick={() => setVisibleCount(prev => prev + 5)}
             type="button"
           >
-            Load more ({filteredTrains.length - visibleCount} remaining)
+            Show more
           </button>
+        )}
+        {!isLoading && !error && !hasMore && filteredTrains.length >= 5 && (
+          <p style={{ color: 'var(--muted)', textAlign: 'center', fontSize: '13px', padding: '8px 0' }}>
+            All available departures shown
+          </p>
         )}
       </div>
 

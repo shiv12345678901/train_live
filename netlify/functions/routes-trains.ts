@@ -161,7 +161,7 @@ const handler: Handler = async (event) => {
         }
 
         departures.sort((a, b) => new Date(a.scheduledTime).getTime() - new Date(b.scheduledTime).getTime());
-        return { statusCode: 200, body: JSON.stringify(departures.slice(0, 20)) };
+        return { statusCode: 200, body: JSON.stringify(departures.slice(0, 30)) };
       }
     }
 
@@ -236,7 +236,7 @@ const handler: Handler = async (event) => {
     }
 
     departures.sort((a, b) => new Date(a.scheduledTime).getTime() - new Date(b.scheduledTime).getTime());
-    return { statusCode: 200, body: JSON.stringify(departures.slice(0, 20)) };
+    return { statusCode: 200, body: JSON.stringify(departures.slice(0, 30)) };
   } catch (error) {
     const msg = error instanceof Error ? error.message : 'Unknown error';
     return { statusCode: 500, body: JSON.stringify({ error: 'Failed to fetch live trains', detail: msg }) };
@@ -284,7 +284,7 @@ async function fallbackDepartureMon(apiKey: string, origin: string, destination:
   }
 
   departures.sort((a, b) => new Date(a.scheduledTime).getTime() - new Date(b.scheduledTime).getTime());
-  return { statusCode: 200, body: JSON.stringify(departures.slice(0, 20)) };
+  return { statusCode: 200, body: JSON.stringify(departures.slice(0, 30)) };
 }
 
 export { handler };
