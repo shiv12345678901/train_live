@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import {
   DndContext,
   closestCenter,
@@ -83,20 +82,7 @@ export function RouteCardGrid({
   onEdit,
   onDelete,
 }: RouteCardGridProps) {
-  const [sortableIds, setSortableIds] = useState<string[]>(() => [
-    ...cards.map((c) => c.id),
-    ADD_NEW_ID,
-  ]);
-
-  // Sync sortableIds when cards change externally
-  const cardIds = cards.map((c) => c.id);
-  const currentCardIds = sortableIds.filter((id) => id !== ADD_NEW_ID);
-  if (
-    cardIds.length !== currentCardIds.length ||
-    cardIds.some((id, i) => currentCardIds[i] !== id)
-  ) {
-    setSortableIds([...cardIds, ADD_NEW_ID]);
-  }
+  const sortableIds = [...cards.map((c) => c.id), ADD_NEW_ID];
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -114,7 +100,6 @@ export function RouteCardGrid({
     const oldIndex = sortableIds.indexOf(String(active.id));
     const newIndex = sortableIds.indexOf(String(over.id));
     const newIds = arrayMove(sortableIds, oldIndex, newIndex);
-    setSortableIds(newIds);
 
     // Report only real card ids (excluding the add-new placeholder)
     const reorderedCardIds = newIds.filter((id) => id !== ADD_NEW_ID);

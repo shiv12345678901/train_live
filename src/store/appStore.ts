@@ -54,6 +54,35 @@ function generateLocalId(): string {
   return `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function remapPendingRouteReferences(localId: string, remoteId: string): void {
+  for (const op of getPendingOps()) {
+    const payload = op.payload as Record<string, unknown>;
+
+    if (op.type === 'create_schedule' && payload.schedule && typeof payload.schedule === 'object') {
+      const schedule = payload.schedule as Record<string, unknown>;
+      if (schedule.routeCardId === localId) {
+        updatePendingOp(op.id, { payload: { ...payload, schedule: { ...schedule, routeCardId: remoteId } } });
+      }
+    }
+
+    if (op.type === 'update_schedule' && payload.updates && typeof payload.updates === 'object') {
+      const updates = payload.updates as Record<string, unknown>;
+      if (updates.routeCardId === localId) {
+        updatePendingOp(op.id, { payload: { ...payload, updates: { ...updates, routeCardId: remoteId } } });
+      }
+    }
+
+    if ((op.type === 'update_route' || op.type === 'delete_route') && payload.id === localId) {
+      updatePendingOp(op.id, { payload: { ...payload, id: remoteId } });
+    }
+
+    if (op.type === 'reorder_routes' && Array.isArray(payload.cardIds)) {
+      const cardIds = payload.cardIds.map((id) => id === localId ? remoteId : id);
+      updatePendingOp(op.id, { payload: { ...payload, cardIds } });
+    }
+  }
+}
+
 export const useAppStore = create<AppState>()((set, get) => ({
   // ─── Route Cards (offline-first) ─────────────────────────────────
 
@@ -103,9 +132,35 @@ export const useAppStore = create<AppState>()((set, get) => ({
         const updated = state.routeCards.map((c) =>
           c.id === localCard.id ? savedCard : c
         );
+        const updatedSchedules = state.alertSchedules.map((schedule) =>
+          schedule.routeCardId === localCard.id ? { ...schedule, routeCardId: savedCard.id } : schedule
+        );
+        const nextLiveTrains = { ...state.liveTrains };
+        const nextLiveTrainsLoading = { ...state.liveTrainsLoading };
+        const nextLiveTrainsError = { ...state.liveTrainsError };
+        if (nextLiveTrains[localCard.id]) {
+          nextLiveTrains[savedCard.id] = nextLiveTrains[localCard.id];
+          delete nextLiveTrains[localCard.id];
+        }
+        if (localCard.id in nextLiveTrainsLoading) {
+          nextLiveTrainsLoading[savedCard.id] = nextLiveTrainsLoading[localCard.id];
+          delete nextLiveTrainsLoading[localCard.id];
+        }
+        if (localCard.id in nextLiveTrainsError) {
+          nextLiveTrainsError[savedCard.id] = nextLiveTrainsError[localCard.id];
+          delete nextLiveTrainsError[localCard.id];
+        }
         setLocalRouteCards(updated);
-        return { routeCards: updated };
+        setLocalAlertSchedules(updatedSchedules);
+        return {
+          routeCards: updated,
+          alertSchedules: updatedSchedules,
+          liveTrains: nextLiveTrains,
+          liveTrainsLoading: nextLiveTrainsLoading,
+          liveTrainsError: nextLiveTrainsError,
+        };
       });
+      remapPendingRouteReferences(localCard.id, savedCard.id);
     } catch {
       // Queue for later sync
       addPendingOp({ type: 'create_route', payload: { localId: localCard.id, card } });
@@ -344,17 +399,45 @@ export const useAppStore = create<AppState>()((set, get) => ({
       try {
         switch (op.type) {
           case 'create_route': {
-            const { card } = op.payload as { localId: string; card: Omit<RouteCard, 'id' | 'createdAt' | 'updatedAt'> };
+            const { localId, card } = op.payload as { localId: string; card: Omit<RouteCard, 'id' | 'createdAt' | 'updatedAt'> };
+            if (!get().routeCards.some((route) => route.id === localId)) {
+              break;
+            }
             const saved = await createRouteCard(card);
-            const { localId } = op.payload as { localId: string };
             // Replace local ID with server ID
             set((state) => {
               const updated = state.routeCards.map((c) =>
                 c.id === localId ? saved : c
               );
+              const updatedSchedules = state.alertSchedules.map((schedule) =>
+                schedule.routeCardId === localId ? { ...schedule, routeCardId: saved.id } : schedule
+              );
+              const nextLiveTrains = { ...state.liveTrains };
+              const nextLiveTrainsLoading = { ...state.liveTrainsLoading };
+              const nextLiveTrainsError = { ...state.liveTrainsError };
+              if (nextLiveTrains[localId]) {
+                nextLiveTrains[saved.id] = nextLiveTrains[localId];
+                delete nextLiveTrains[localId];
+              }
+              if (localId in nextLiveTrainsLoading) {
+                nextLiveTrainsLoading[saved.id] = nextLiveTrainsLoading[localId];
+                delete nextLiveTrainsLoading[localId];
+              }
+              if (localId in nextLiveTrainsError) {
+                nextLiveTrainsError[saved.id] = nextLiveTrainsError[localId];
+                delete nextLiveTrainsError[localId];
+              }
               setLocalRouteCards(updated);
-              return { routeCards: updated };
+              setLocalAlertSchedules(updatedSchedules);
+              return {
+                routeCards: updated,
+                alertSchedules: updatedSchedules,
+                liveTrains: nextLiveTrains,
+                liveTrainsLoading: nextLiveTrainsLoading,
+                liveTrainsError: nextLiveTrainsError,
+              };
             });
+            remapPendingRouteReferences(localId, saved.id);
             break;
           }
           case 'update_route': {

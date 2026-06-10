@@ -48,7 +48,7 @@ export function RouteCreationSheet({ onSave, onCancel, editCard }: RouteCreation
           id="route-origin"
           label="Origin"
           value={origin}
-          onChange={(val, stopId) => { setOrigin(val); if (stopId) setOriginStopId(stopId); }}
+          onChange={(val, stopId) => { setOrigin(val); setOriginStopId(stopId ?? ''); }}
           placeholder="Search station or stop..."
         />
         {errors.origin && <span className="form-error" style={{ marginTop: '-8px', marginBottom: '12px', display: 'block' }}>{errors.origin}</span>}
@@ -56,7 +56,7 @@ export function RouteCreationSheet({ onSave, onCancel, editCard }: RouteCreation
           id="route-destination"
           label="Destination"
           value={destination}
-          onChange={(val, stopId) => { setDestination(val); if (stopId) setDestinationStopId(stopId); }}
+          onChange={(val, stopId) => { setDestination(val); setDestinationStopId(stopId ?? ''); }}
           placeholder="Search station or stop..."
         />
         {errors.destination && <span className="form-error" style={{ marginTop: '-8px', marginBottom: '12px', display: 'block' }}>{errors.destination}</span>}

@@ -14,13 +14,32 @@ function getGreeting(): string {
 
 export function HomeScreen() {
   const navigate = useNavigate();
-  const { routeCards, alertSchedules, liveTrains, loadRouteCards, reorderRouteCards, saveRouteCard, updateRouteCard, deleteRouteCard } = useAppStore();
+  const {
+    routeCards,
+    alertSchedules,
+    liveTrains,
+    liveTrainsLoading,
+    loadRouteCards,
+    reorderRouteCards,
+    saveRouteCard,
+    updateRouteCard,
+    deleteRouteCard,
+    fetchLiveTrains,
+  } = useAppStore();
   const [showCreation, setShowCreation] = useState(false);
   const [editingCard, setEditingCard] = useState<RouteCardType | null>(null);
 
   useEffect(() => {
     loadRouteCards();
   }, [loadRouteCards]);
+
+  useEffect(() => {
+    for (const card of routeCards.slice(0, 4)) {
+      if (!liveTrains[card.id] && !liveTrainsLoading[card.id]) {
+        void fetchLiveTrains(card.id);
+      }
+    }
+  }, [fetchLiveTrains, liveTrains, liveTrainsLoading, routeCards]);
 
   const handleSave = async (data: { title: string; origin: string; destination: string; routeFilter: string[]; originStopId?: string; destinationStopId?: string }) => {
     if (editingCard) {

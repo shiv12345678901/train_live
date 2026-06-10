@@ -13,6 +13,7 @@ export function RouteDetailsPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const routeCards = useAppStore((s) => s.routeCards);
+  const loadRouteCards = useAppStore((s) => s.loadRouteCards);
   const liveTrains = useAppStore((s) => s.liveTrains);
   const liveTrainsLoading = useAppStore((s) => s.liveTrainsLoading);
   const liveTrainsError = useAppStore((s) => s.liveTrainsError);
@@ -26,6 +27,7 @@ export function RouteDetailsPage() {
   const [filterState, setFilterState] = useState({ routeFilter: 'train', visibleCount: 5 });
   const [selectedTrain, setSelectedTrain] = useState<TrainDeparture | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [routesLoaded, setRoutesLoaded] = useState(routeCards.length > 0);
   const { routeFilter, visibleCount } = filterState;
 
   const filteredTrains = routeFilter === 'all'
@@ -43,20 +45,38 @@ export function RouteDetailsPage() {
   }, [fetchLiveTrains, id]);
 
   useEffect(() => {
-    if (id) {
+    let cancelled = false;
+    loadRouteCards().finally(() => {
+      if (!cancelled) setRoutesLoaded(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [loadRouteCards]);
+
+  useEffect(() => {
+    if (id && card) {
       void fetchLiveTrains(id);
     }
-  }, [id, fetchLiveTrains]);
+  }, [id, card, fetchLiveTrains]);
+
+  function formatPrefillTime(isoTime: string): string {
+    const date = new Date(isoTime);
+    if (Number.isNaN(date.getTime())) return '';
+    return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+  }
 
   const handleBellTap = (train: TrainDeparture) => {
     if (!card) return;
+    const departureTime = formatPrefillTime(train.estimatedTime || train.scheduledTime);
+    if (!departureTime) return;
     setPendingAlertPrefill({
       routeCardId: card.id,
       routeTitle: card.title,
       origin: card.origin,
       destination: card.destination,
       routeFilter: card.routeFilter,
-      departureTime: train.estimatedTime || train.scheduledTime,
+      departureTime,
       tripId: train.tripId,
       platform: train.platform,
     });
@@ -70,6 +90,17 @@ export function RouteDetailsPage() {
   const updatedLabel = lastUpdated
     ? `Updated ${lastUpdated.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true })}`
     : 'Live departures';
+
+  if (!card && !routesLoaded) {
+    return (
+      <div>
+        <PageHeader title="Route" backButton />
+        <div className="route-details-trains">
+          <LoadingSkeleton />
+        </div>
+      </div>
+    );
+  }
 
   if (!card) {
     return (

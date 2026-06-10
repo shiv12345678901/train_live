@@ -1,13 +1,31 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { SettingRow } from './SettingRow';
 import { useAppStore } from '@/store/appStore';
+import { API_BASE } from '@/api/client';
+
+type HealthState = 'checking' | 'connected' | 'offline';
 
 export function SettingsScreen() {
   const { settings, updateSettings } = useAppStore();
   const [botTokenInput, setBotTokenInput] = useState(settings.telegramBotToken ?? '');
   const [chatIdInput, setChatIdInput] = useState(settings.telegramChatId ?? '');
   const [openPanel, setOpenPanel] = useState<'telegram' | 'timezone' | null>(null);
+  const [healthState, setHealthState] = useState<HealthState>('checking');
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${API_BASE}/health`)
+      .then((res) => {
+        if (!cancelled) setHealthState(res.ok ? 'connected' : 'offline');
+      })
+      .catch(() => {
+        if (!cancelled) setHealthState('offline');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleSaveTelegram = () => {
     updateSettings({
@@ -94,8 +112,14 @@ export function SettingsScreen() {
         />
         <SettingRow
           label="Data"
-          value="Stored locally and synced in background"
-          status="none"
+          value={
+            healthState === 'checking'
+              ? 'Checking backend connection'
+              : healthState === 'connected'
+                ? 'Backend connected. Local backup enabled'
+                : 'Local-only mode. Backend unavailable'
+          }
+          status={healthState === 'connected' ? 'connected' : healthState === 'offline' ? 'disconnected' : 'none'}
         />
       </section>
     </div>

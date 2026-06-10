@@ -15,6 +15,39 @@ interface TrainDeparture {
   alerts: { id: string; title: string; description: string }[];
 }
 
+function idsMatch(value: unknown, targetId: string): boolean {
+  return typeof value === 'string' && value === targetId;
+}
+
+function serviceMatchesDestination(
+  serviceDestination: Record<string, unknown>,
+  targetDestination: string,
+  targetStopId?: string
+): boolean {
+  const parent = (serviceDestination.parent || {}) as Record<string, unknown>;
+  if (targetStopId && (idsMatch(serviceDestination.id, targetStopId) || idsMatch(parent.id, targetStopId))) {
+    return true;
+  }
+  return matchesDestination(String(serviceDestination.name || ''), targetDestination);
+}
+
+function stopSequenceContainsDestination(
+  stopSequence: Array<Record<string, unknown>>,
+  targetDestination: string,
+  targetStopId?: string
+): boolean {
+  const targetLower = targetDestination.toLowerCase();
+  return stopSequence.some((stop) => {
+    const parent = (stop.parent || {}) as Record<string, unknown>;
+    if (targetStopId && (idsMatch(stop.id, targetStopId) || idsMatch(parent.id, targetStopId))) {
+      return true;
+    }
+    const stopName = String(stop.name || '').toLowerCase();
+    const parentName = String(parent.name || '').toLowerCase();
+    return stopName.includes(targetLower) || parentName.includes(targetLower);
+  });
+}
+
 const handler: Handler = async (event) => {
   if (event.httpMethod !== 'GET') {
     return { statusCode: 405, body: JSON.stringify({ error: 'Method not allowed' }) };
@@ -30,6 +63,7 @@ const handler: Handler = async (event) => {
     const origin = event.queryStringParameters?.origin || '';
     const destination = event.queryStringParameters?.destination || '';
     const originStopId = event.queryStringParameters?.originStopId || '';
+    const destinationStopId = event.queryStringParameters?.destinationStopId || '';
 
     if (!origin || !destination) {
       return { statusCode: 400, body: JSON.stringify({ error: 'Origin and destination query params are required' }) };
@@ -91,11 +125,10 @@ const handler: Handler = async (event) => {
           const transportType = detectTransportType(productClass, productName, line);
 
           // Get the train's final destination name
-          const transportDest = (transportation.destination || {}) as Record<string, string>;
-          const destStop = (transportDest.name || '').toLowerCase();
+          const transportDest = (transportation.destination || {}) as Record<string, unknown>;
           
           // Accept if destination matches target
-          if (!matchesDestination(destStop, destination)) continue;
+          if (!serviceMatchesDestination(transportDest, destination, destinationStopId)) continue;
 
           const scheduledTime = (stopEvent.departureTimePlanned as string) || '';
           const estimatedTime = (stopEvent.departureTimeEstimated as string) || undefined;
@@ -132,7 +165,9 @@ const handler: Handler = async (event) => {
     }
 
     // Fallback: try Trip Planner API
-    const tripUrl = `https://api.transport.nsw.gov.au/v1/tp/trip?outputFormat=rapidJSON&coordOutputFormat=EPSG%3A4326&depArrMacro=dep&type_origin=any&name_origin=${encodeURIComponent(origin)}&type_destination=any&name_destination=${encodeURIComponent(destination)}&calcNumberOfTrips=6&TfNSWTR=true&version=10.2.1.42`;
+    const destinationType = destinationStopId ? 'stop' : 'any';
+    const destinationName = destinationStopId || destination;
+    const tripUrl = `https://api.transport.nsw.gov.au/v1/tp/trip?outputFormat=rapidJSON&coordOutputFormat=EPSG%3A4326&depArrMacro=dep&type_origin=any&name_origin=${encodeURIComponent(origin)}&type_destination=${destinationType}&name_destination=${encodeURIComponent(destinationName)}&calcNumberOfTrips=6&TfNSWTR=true&version=10.2.1.42`;
 
     const tripResponse = await fetchWithTimeout(tripUrl, {
       headers: { 'Authorization': `apikey ${apiKey}` },
@@ -169,15 +204,9 @@ const handler: Handler = async (event) => {
       const tripId = (transportation.id as string) || `trip-${departures.length}`;
       const isCancelled = leg.isCancelled === true;
 
-      // Check stop sequence includes destination
       const stopSequence = (leg.stopSequence || []) as Array<Record<string, unknown>>;
       if (stopSequence.length > 0) {
-        const destLower = destination.toLowerCase();
-        const stopsAtDest = stopSequence.some((stop) => {
-          const stopName = ((stop.name as string) || '').toLowerCase();
-          const stopParent = ((stop.parent || {}) as Record<string, string>).name || '';
-          return stopName.includes(destLower) || stopParent.toLowerCase().includes(destLower);
-        });
+        const stopsAtDest = stopSequenceContainsDestination(stopSequence, destination, destinationStopId);
         if (!stopsAtDest) continue;
       }
 
