@@ -17,8 +17,10 @@ export function AddNewCard({ onClick, index = 0 }: AddNewCardProps) {
           <line x1="7" y1="12" x2="17" y2="12" />
         </svg>
       </div>
-      <h3 className="add-new-title">New route</h3>
-      <p className="add-new-subtitle">Tap to add</p>
+      <div className="add-new-copy">
+        <h3 className="add-new-title">New route</h3>
+        <p className="add-new-subtitle">Tap to add</p>
+      </div>
     </button>
   );
 }

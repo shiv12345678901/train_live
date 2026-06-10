@@ -87,27 +87,33 @@ export function RouteCard({ card, alertStatus, nextTrain, onClick, onEdit, onDel
         onPointerLeave={handlePointerLeave}
         type="button"
       >
-        <div className="route-card-header">
-          <div className="route-card-icon">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="4" y="10" width="16" height="8" rx="2"/>
-              <path d="M4 7a4 4 0 014-4h8a4 4 0 014 4v3H4V7z"/>
-              <circle cx="8" cy="15" r="1.5" fill="currentColor" stroke="none"/>
-              <circle cx="16" cy="15" r="1.5" fill="currentColor" stroke="none"/>
-              <path d="M9 21l1.5-3h3L15 21"/>
-            </svg>
+        <div className="route-card-main">
+          <div className="route-card-header">
+            <div className="route-card-icon">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="4" y="10" width="16" height="8" rx="2"/>
+                <path d="M4 7a4 4 0 014-4h8a4 4 0 014 4v3H4V7z"/>
+                <circle cx="8" cy="15" r="1.5" fill="currentColor" stroke="none"/>
+                <circle cx="16" cy="15" r="1.5" fill="currentColor" stroke="none"/>
+                <path d="M9 21l1.5-3h3L15 21"/>
+              </svg>
+            </div>
+            <div className="route-card-info">
+              <h3 className="route-card-title">{card.title}</h3>
+              <p className="route-card-route">{shortOrigin} → {shortDest}</p>
+            </div>
           </div>
-          <h3 className="route-card-title">{card.title}</h3>
+          <div className="route-card-next">
+            <span className="route-card-next-label">Next</span>
+            <span className="route-card-next-value">{nextLabel}</span>
+          </div>
         </div>
-
-        <p className="route-card-route">{shortOrigin} → {shortDest}</p>
-        <div className="route-card-next">
-          <span className="route-card-next-label">Next</span>
-          <span className="route-card-next-value">{nextLabel}</span>
-        </div>
-        <div className={`route-card-badge ${isActive ? 'is-active' : ''}`}>
-          <span className="route-card-badge-dot" />
-          {alertStatus}
+        <div className="route-card-status-row">
+          <div className={`route-card-badge ${isActive ? 'is-active' : ''}`}>
+            <span className="route-card-badge-dot" />
+            {alertStatus}
+          </div>
+          <span className="route-card-chevron" aria-hidden="true">›</span>
         </div>
       </button>
 
