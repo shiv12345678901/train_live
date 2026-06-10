@@ -24,7 +24,7 @@ export function RouteDetailsPage() {
   const trains = id ? liveTrains[id] ?? [] : [];
   const isLoading = id ? liveTrainsLoading[id] ?? false : false;
   const error = id ? liveTrainsError[id] ?? null : null;
-  const [filterState, setFilterState] = useState({ routeFilter: 'train', visibleCount: 5 });
+  const [filterState, setFilterState] = useState({ routeFilter: 'all', visibleCount: 5 });
   const [selectedTrain, setSelectedTrain] = useState<TrainDeparture | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [routesLoaded, setRoutesLoaded] = useState(routeCards.length > 0);
@@ -44,10 +44,10 @@ export function RouteDetailsPage() {
   const hasMore = filteredTrains.length > visibleCount;
 
   const refreshLiveTrains = useCallback(async () => {
-    if (!id) return;
+    if (!id || !card) return;
     await fetchLiveTrains(id);
     setLastUpdated(new Date());
-  }, [fetchLiveTrains, id]);
+  }, [card, fetchLiveTrains, id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -61,9 +61,27 @@ export function RouteDetailsPage() {
 
   useEffect(() => {
     if (id && card) {
-      void fetchLiveTrains(id);
+      void fetchLiveTrains(id).finally(() => setLastUpdated(new Date()));
     }
   }, [id, card, fetchLiveTrains]);
+
+  useEffect(() => {
+    if (!id || !card) return;
+
+    const refreshIfVisible = () => {
+      if (document.visibilityState === 'visible') {
+        void refreshLiveTrains();
+      }
+    };
+
+    const intervalId = window.setInterval(refreshIfVisible, 30000);
+    document.addEventListener('visibilitychange', refreshIfVisible);
+
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', refreshIfVisible);
+    };
+  }, [card, id, refreshLiveTrains]);
 
   function formatPrefillTime(isoTime: string): string {
     const date = new Date(isoTime);
@@ -178,6 +196,7 @@ export function RouteDetailsPage() {
           origin={card.origin}
           destination={card.destination}
           originStopId={card.originStopId}
+          destinationStopId={card.destinationStopId}
           onClose={() => setSelectedTrain(null)}
         />
       )}

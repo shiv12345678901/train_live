@@ -41,11 +41,18 @@ async function fetchLiveTrainStatus(
   origin: string,
   destination: string,
   departureTimeHHmm: string,
-  apiKey: string
+  apiKey: string,
+  originStopId?: string,
+  destinationStopId?: string,
+  selectedTripId?: string,
+  selectedPlatform?: string
 ): Promise<LiveTrain | null> {
   try {
-    // Use Trip Planner to find trains between origin and destination
-    const url = `https://api.transport.nsw.gov.au/v1/tp/trip?outputFormat=rapidJSON&coordOutputFormat=EPSG%3A4326&depArrMacro=dep&type_origin=any&name_origin=${encodeURIComponent(origin)}&type_destination=any&name_destination=${encodeURIComponent(destination)}&calcNumberOfTrips=5&TfNSWTR=true&version=10.2.1.42`;
+    const originType = originStopId ? 'stop' : 'any';
+    const originName = originStopId || origin;
+    const destinationType = destinationStopId ? 'stop' : 'any';
+    const destinationName = destinationStopId || destination;
+    const url = `https://api.transport.nsw.gov.au/v1/tp/trip?outputFormat=rapidJSON&coordOutputFormat=EPSG%3A4326&depArrMacro=dep&type_origin=${originType}&name_origin=${encodeURIComponent(originName)}&type_destination=${destinationType}&name_destination=${encodeURIComponent(destinationName)}&calcNumberOfTrips=5&TfNSWTR=true&version=10.2.1.42`;
 
     const res = await fetchWithTimeout(url, { headers: { 'Authorization': `apikey ${apiKey}` } });
     if (!res.ok) return null;
@@ -58,12 +65,15 @@ async function fetchLiveTrainStatus(
 
     for (const journey of journeys) {
       const legs = (journey.legs || []) as Array<Record<string, unknown>>;
-      if (legs.length !== 1) continue; // Direct services only
+      const transitLegs = legs.filter((candidate) => {
+        const candidateTransportation = (candidate.transportation || {}) as Record<string, unknown>;
+        const candidateProduct = (candidateTransportation.product || {}) as Record<string, unknown>;
+        return Number(candidateProduct.class) !== 100;
+      });
+      if (transitLegs.length !== 1) continue;
 
-      const leg = legs[0];
+      const leg = transitLegs[0];
       const transportation = (leg.transportation || {}) as Record<string, unknown>;
-      const product = (transportation.product || {}) as Record<string, unknown>;
-      if ((product.class as number) === 100) continue; // Skip walking
 
       const originInfo = (leg.origin || {}) as Record<string, unknown>;
       const scheduledTime = (originInfo.departureTimePlanned as string) || '';
@@ -81,6 +91,11 @@ async function fetchLiveTrainStatus(
       const platformRaw = (originInfo.disassembledName as string) || '';
       const platformMatch = platformRaw.match(/(\d+|[A-Z])$/);
       const platform = platformMatch ? platformMatch[1] : '';
+      if (selectedPlatform && platform && selectedPlatform !== platform) continue;
+
+      const tripId = (transportation.id as string) || '';
+      if (selectedTripId && tripId && selectedTripId !== tripId && diffMins > 2) continue;
+
       const line = (transportation.disassembledName || transportation.number || '') as string;
       const isCancelled = leg.isCancelled === true;
 
@@ -262,12 +277,16 @@ const schedulerHandler: Handler = async () => {
         // Get route card for origin/destination
         let origin = '';
         let destination = '';
+        let originStopId = '';
+        let destinationStopId = '';
         if (alert.routeCardId) {
           const cardDoc = await getRouteCardsRef(userId).doc(alert.routeCardId).get();
           if (cardDoc.exists) {
             const cardData = cardDoc.data()!;
             origin = cardData.origin || '';
             destination = cardData.destination || '';
+            originStopId = cardData.originStopId || '';
+            destinationStopId = cardData.destinationStopId || '';
           }
         }
 
@@ -291,7 +310,7 @@ const schedulerHandler: Handler = async () => {
           // Fetch live train status
           let train: LiveTrain | null = null;
           if (apiKey && origin && destination) {
-            train = await fetchLiveTrainStatus(origin, destination, departureTime, apiKey);
+            train = await fetchLiveTrainStatus(origin, destination, departureTime, apiKey, originStopId, destinationStopId, alert.selectedTripId, alert.selectedPlatform);
           }
 
           // Format and send message
@@ -320,7 +339,7 @@ const schedulerHandler: Handler = async () => {
           if (!isWithinWindow(minsUntilDeparture, offset)) continue;
           if (!apiKey || !origin || !destination) continue;
 
-          const train = await fetchLiveTrainStatus(origin, destination, departureTime, apiKey);
+          const train = await fetchLiveTrainStatus(origin, destination, departureTime, apiKey, originStopId, destinationStopId, alert.selectedTripId, alert.selectedPlatform);
           if (!train) continue;
 
           const lastState = delivery.lastKnownTripState;

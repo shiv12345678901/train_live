@@ -5,6 +5,7 @@ import { detectTransportType, getTimingStatus, matchesDestination } from '../../
 interface TrainDeparture {
   tripId: string;
   route: string;
+  destination?: string;
   platform: string;
   scheduledTime: string;
   estimatedTime?: string;
@@ -46,6 +47,21 @@ function stopSequenceContainsDestination(
     const parentName = String(parent.name || '').toLowerCase();
     return stopName.includes(targetLower) || parentName.includes(targetLower);
   });
+}
+
+function stopEventServesDestination(
+  stopEvent: Record<string, unknown>,
+  targetDestination: string,
+  targetStopId?: string
+): boolean {
+  const onwardLocations = (stopEvent.onwardLocations || []) as Array<Record<string, unknown>>;
+  if (onwardLocations.length > 0) {
+    return stopSequenceContainsDestination(onwardLocations, targetDestination, targetStopId);
+  }
+
+  const transportation = (stopEvent.transportation || {}) as Record<string, unknown>;
+  const transportDest = (transportation.destination || {}) as Record<string, unknown>;
+  return serviceMatchesDestination(transportDest, targetDestination, targetStopId);
 }
 
 const handler: Handler = async (event) => {
@@ -124,11 +140,8 @@ const handler: Handler = async (event) => {
           const productName = (product.name as string) || '';
           const transportType = detectTransportType(productClass, productName, line);
 
-          // Get the train's final destination name
           const transportDest = (transportation.destination || {}) as Record<string, unknown>;
-          
-          // Accept if destination matches target
-          if (!serviceMatchesDestination(transportDest, destination, destinationStopId)) continue;
+          if (!stopEventServesDestination(stopEvent, destination, destinationStopId)) continue;
 
           const scheduledTime = (stopEvent.departureTimePlanned as string) || '';
           const estimatedTime = (stopEvent.departureTimeEstimated as string) || undefined;
@@ -148,6 +161,7 @@ const handler: Handler = async (event) => {
           departures.push({
             tripId: tripId || `trip-${departures.length}`,
             route: line,
+            destination: String(transportDest.name || destination),
             platform,
             scheduledTime,
             estimatedTime,
@@ -228,7 +242,8 @@ const handler: Handler = async (event) => {
       const dedupeKey = `${tripId}:${scheduledTime}:${platform}:${transportType}`;
       if (seenTrips.has(dedupeKey)) continue;
       seenTrips.add(dedupeKey);
-      departures.push({ tripId, route: line, platform, scheduledTime, estimatedTime, status, delayMinutes, cancelled: isCancelled, transportType, alerts: [] });
+      const transportDest = (transportation.destination || {}) as Record<string, unknown>;
+      departures.push({ tripId, route: line, destination: String(transportDest.name || destination), platform, scheduledTime, estimatedTime, status, delayMinutes, cancelled: isCancelled, transportType, alerts: [] });
     }
 
     departures.sort((a, b) => new Date(a.scheduledTime).getTime() - new Date(b.scheduledTime).getTime());
@@ -263,7 +278,7 @@ async function fallbackDepartureMon(
     const transportation = (stopEvent.transportation || {}) as Record<string, unknown>;
     const line = (transportation.disassembledName || transportation.number || '') as string;
     const transportDest = (transportation.destination || {}) as Record<string, unknown>;
-    if (!serviceMatchesDestination(transportDest, destination, destinationStopId)) continue;
+    if (!stopEventServesDestination(stopEvent, destination, destinationStopId)) continue;
 
     const scheduledTime = (stopEvent.departureTimePlanned as string) || '';
     const estimatedTime = (stopEvent.departureTimeEstimated as string) || undefined;
@@ -277,7 +292,7 @@ async function fallbackDepartureMon(
     const productName = (product.name as string) || '';
     const { status, delayMinutes } = getTimingStatus(scheduledTime, estimatedTime, isCancelled);
 
-    departures.push({ tripId: (transportation.id as string) || `trip-${departures.length}`, route: line, platform, scheduledTime, estimatedTime, status, delayMinutes, cancelled: isCancelled, transportType: detectTransportType(productClass, productName, line), alerts: [] });
+    departures.push({ tripId: (transportation.id as string) || `trip-${departures.length}`, route: line, destination: String(transportDest.name || destination), platform, scheduledTime, estimatedTime, status, delayMinutes, cancelled: isCancelled, transportType: detectTransportType(productClass, productName, line), alerts: [] });
   }
 
   departures.sort((a, b) => new Date(a.scheduledTime).getTime() - new Date(b.scheduledTime).getTime());

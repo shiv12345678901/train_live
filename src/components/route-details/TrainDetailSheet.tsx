@@ -23,6 +23,7 @@ interface TrainDetailSheetProps {
   origin: string;
   destination: string;
   originStopId?: string;
+  destinationStopId?: string;
   onClose: () => void;
 }
 
@@ -31,7 +32,7 @@ function formatTime(iso: string): string {
   return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
 }
 
-export function TrainDetailSheet({ train, origin, destination, originStopId, onClose }: TrainDetailSheetProps) {
+export function TrainDetailSheet({ train, origin, destination, originStopId, destinationStopId, onClose }: TrainDetailSheetProps) {
   const [tripData, setTripData] = useState<TripData | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -42,8 +43,12 @@ export function TrainDetailSheet({ train, origin, destination, originStopId, onC
           origin,
           destination,
           scheduledTime: train.scheduledTime || '',
+          tripId: train.tripId || '',
+          platform: train.platform || '',
+          route: train.route || '',
         });
         if (originStopId) params.set('originStopId', originStopId);
+        if (destinationStopId) params.set('destinationStopId', destinationStopId);
         const res = await fetch(`${API_BASE}/trip-stops?${params}`);
         if (res.ok) {
           const data = await res.json();
@@ -55,7 +60,7 @@ export function TrainDetailSheet({ train, origin, destination, originStopId, onC
       setLoading(false);
     };
     fetchStops();
-  }, [origin, destination, originStopId, train.scheduledTime]);
+  }, [destination, destinationStopId, origin, originStopId, train.platform, train.route, train.scheduledTime, train.tripId]);
 
   return (
     <div className="train-detail-overlay" onClick={onClose}>
@@ -67,7 +72,7 @@ export function TrainDetailSheet({ train, origin, destination, originStopId, onC
             <div>
               <h3 className="train-detail-title">{train.route}</h3>
               <p className="train-detail-subtitle">
-                {tripData?.destination || destination.replace(/\s*Station\s*/gi, '')}
+                {tripData?.destination || train.destination || destination.replace(/\s*Station\s*/gi, '')}
               </p>
             </div>
             <button className="train-detail-close" onClick={onClose} type="button">

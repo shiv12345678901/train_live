@@ -34,6 +34,7 @@ export type AlertSchedule = {
 export type TrainDeparture = {
   tripId: string;
   route: string;
+  destination?: string;
   platform: string;
   scheduledTime: string; // ISO datetime
   estimatedTime?: string; // ISO datetime

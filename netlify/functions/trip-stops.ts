@@ -10,6 +10,68 @@ interface StopInfo {
   isPassed?: boolean;
 }
 
+function idsMatch(value: unknown, targetId: string): boolean {
+  return typeof value === 'string' && value === targetId;
+}
+
+function stopMatches(stop: Record<string, unknown>, targetName: string, targetStopId?: string): boolean {
+  const parent = (stop.parent || {}) as Record<string, unknown>;
+  if (targetStopId && (idsMatch(stop.id, targetStopId) || idsMatch(parent.id, targetStopId))) {
+    return true;
+  }
+
+  const target = targetName.toLowerCase().replace(/\s*station\s*/gi, '').trim();
+  const stopName = String(stop.name || '').toLowerCase().replace(/\s*station\s*/gi, '').trim();
+  const parentName = String(parent.name || '').toLowerCase().replace(/\s*station\s*/gi, '').trim();
+  return Boolean(target && (stopName.includes(target) || parentName.includes(target)));
+}
+
+function eventServesDestination(
+  stopEvent: Record<string, unknown>,
+  destination: string,
+  destinationStopId?: string
+): boolean {
+  const onwardLocations = (stopEvent.onwardLocations || []) as Array<Record<string, unknown>>;
+  if (onwardLocations.some((loc) => stopMatches(loc, destination, destinationStopId))) {
+    return true;
+  }
+
+  const transportation = (stopEvent.transportation || {}) as Record<string, unknown>;
+  const transportDest = (transportation.destination || {}) as Record<string, unknown>;
+  return stopMatches(transportDest, destination, destinationStopId);
+}
+
+function eventMatchScore(
+  stopEvent: Record<string, unknown>,
+  scheduledTime: string,
+  tripId: string,
+  platform: string,
+  route: string
+): number {
+  const transportation = (stopEvent.transportation || {}) as Record<string, unknown>;
+  const location = (stopEvent.location || {}) as Record<string, unknown>;
+  const locationProps = (location.properties || {}) as Record<string, string>;
+
+  let score = 0;
+  const eventTripId = String(transportation.id || '');
+  if (tripId && eventTripId === tripId) score += 100;
+
+  const eventRoute = String(transportation.disassembledName || transportation.number || '');
+  if (route && eventRoute === route) score += 20;
+
+  const eventPlatform = locationProps.platform || '';
+  if (platform && eventPlatform && eventPlatform === platform) score += 15;
+
+  const depPlanned = String(stopEvent.departureTimePlanned || '');
+  if (scheduledTime && depPlanned) {
+    const diff = Math.abs(new Date(depPlanned).getTime() - new Date(scheduledTime).getTime());
+    if (diff < 120000) score += 40;
+    else if (diff < 600000) score += 10;
+  }
+
+  return score;
+}
+
 const handler: Handler = async (event) => {
   if (event.httpMethod !== 'GET') {
     return { statusCode: 405, body: JSON.stringify({ error: 'Method not allowed' }) };
@@ -18,7 +80,11 @@ const handler: Handler = async (event) => {
   const origin = event.queryStringParameters?.origin || '';
   const destination = event.queryStringParameters?.destination || '';
   const originStopId = event.queryStringParameters?.originStopId || '';
+  const destinationStopId = event.queryStringParameters?.destinationStopId || '';
   const scheduledTime = event.queryStringParameters?.scheduledTime || '';
+  const tripId = event.queryStringParameters?.tripId || '';
+  const platform = event.queryStringParameters?.platform || '';
+  const route = event.queryStringParameters?.route || '';
 
   if (!origin) {
     return { statusCode: 400, body: JSON.stringify({ error: 'origin required' }) };
@@ -63,25 +129,22 @@ const handler: Handler = async (event) => {
     const dmData = (await dmRes.json()) as Record<string, unknown>;
     const stopEvents = (dmData?.stopEvents || []) as Array<Record<string, unknown>>;
 
-    // Find the matching departure by scheduled time
     let matchedEvent: Record<string, unknown> | null = null;
+    let bestScore = 0;
 
     for (const evt of stopEvents) {
-      const depPlanned = evt.departureTimePlanned as string || '';
-      if (scheduledTime && depPlanned) {
-        // Match by time (within 2 minutes)
-        const evtTime = new Date(depPlanned).getTime();
-        const targetTime = new Date(scheduledTime).getTime();
-        if (Math.abs(evtTime - targetTime) < 120000) {
-          matchedEvent = evt;
-          break;
-        }
+      if (destination && !eventServesDestination(evt, destination, destinationStopId)) continue;
+      const score = eventMatchScore(evt, scheduledTime, tripId, platform, route);
+      if (score > bestScore) {
+        bestScore = score;
+        matchedEvent = evt;
       }
     }
 
-    // If no exact match, use first event
-    if (!matchedEvent && stopEvents.length > 0) {
-      matchedEvent = stopEvents[0];
+    if (!matchedEvent && !scheduledTime && stopEvents.length > 0) {
+      matchedEvent = destination
+        ? stopEvents.find((evt) => eventServesDestination(evt, destination, destinationStopId)) || null
+        : stopEvents[0];
     }
 
     if (!matchedEvent) {
@@ -145,6 +208,10 @@ const handler: Handler = async (event) => {
         isPassed,
         isCurrent: false,
       });
+
+      if (destination && stopMatches(loc, destination, destinationStopId)) {
+        break;
+      }
     }
 
     return {
