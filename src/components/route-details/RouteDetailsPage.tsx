@@ -7,7 +7,7 @@ import { LoadingSkeleton } from './LoadingSkeleton';
 import { InlineError } from './InlineError';
 import { useAppStore } from '@/store/appStore';
 import type { TrainDeparture } from '@/types';
-import { getTransportMode } from './transportMode';
+import { getDepartureMode } from './transportMode';
 
 export function RouteDetailsPage() {
   const { id } = useParams<{ id: string }>();
@@ -30,9 +30,14 @@ export function RouteDetailsPage() {
   const [routesLoaded, setRoutesLoaded] = useState(routeCards.length > 0);
   const { routeFilter, visibleCount } = filterState;
 
+  const uniqueTrains = trains.filter((train, index, list) => {
+    const key = `${train.tripId}:${train.scheduledTime}:${train.platform}:${getDepartureMode(train)}`;
+    return list.findIndex((item) => `${item.tripId}:${item.scheduledTime}:${item.platform}:${getDepartureMode(item)}` === key) === index;
+  });
+
   const filteredTrains = routeFilter === 'all'
-    ? trains
-    : trains.filter(t => (t.transportType || getTransportMode(t.route)) === routeFilter);
+    ? uniqueTrains
+    : uniqueTrains.filter(t => getDepartureMode(t) === routeFilter);
 
   // Show visibleCount results
   const displayTrains = filteredTrains.slice(0, visibleCount);
@@ -131,19 +136,25 @@ export function RouteDetailsPage() {
       <div className="route-details-trains">
         {isLoading && <LoadingSkeleton />}
         {error && <InlineError message={error} onRetry={refreshLiveTrains} />}
-        {!isLoading && !error && trains.length > 0 && (
-          <ModeFilter trains={trains} activeFilter={routeFilter} onFilter={handleFilter} />
+        {!isLoading && !error && uniqueTrains.length > 0 && (
+          <ModeFilter trains={uniqueTrains} activeFilter={routeFilter} onFilter={handleFilter} />
         )}
-        {!isLoading && !error && trains.length === 0 && (
+        {!isLoading && !error && uniqueTrains.length === 0 && (
           <div className="route-details-empty-state">
             <p className="route-details-empty-title">No services found for this route</p>
             <p className="route-details-empty-copy">Check the station names or refresh live departures.</p>
             <button className="btn-secondary route-details-empty-action" type="button" onClick={refreshLiveTrains}>Refresh</button>
           </div>
         )}
+        {!isLoading && !error && uniqueTrains.length > 0 && displayTrains.length === 0 && (
+          <div className="route-details-empty-state">
+            <p className="route-details-empty-title">No {routeFilter.replace('_', ' ')} services found</p>
+            <p className="route-details-empty-copy">Try another mode filter or refresh live departures.</p>
+          </div>
+        )}
         {!isLoading && !error && displayTrains.map((train) => (
           <TrainCard
-            key={train.tripId}
+            key={`${train.tripId}:${train.scheduledTime}:${train.platform}:${getDepartureMode(train)}`}
             train={train}
             onBellTap={() => handleBellTap(train)}
             onTap={() => setSelectedTrain(train)}

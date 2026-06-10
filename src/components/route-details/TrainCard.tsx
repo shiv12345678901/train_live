@@ -1,5 +1,5 @@
 import type { TrainDeparture } from '@/types';
-import { getTransportMode } from './transportMode';
+import { getDepartureMode } from './transportMode';
 
 interface TrainCardProps {
   train: TrainDeparture;
@@ -83,7 +83,7 @@ export function TrainCard({ train, onBellTap, onTap }: TrainCardProps) {
   const scheduledStr = formatTime(train.scheduledTime);
   const minutesAway = displayTime ? getMinutesUntil(displayTime) : null;
   const platform = formatPlatform(train.platform);
-  const mode = train.transportType || getTransportMode(train.route);
+  const mode = getDepartureMode(train);
 
   const statusConfig = {
     'on-time': { label: 'On time', class: 'status-ontime', dot: '#0b7a3b' },
@@ -165,7 +165,7 @@ const MODE_CHIPS: { mode: string; label: string }[] = [
 
 export function ModeFilter({ trains, activeFilter, onFilter }: ModeFilterProps) {
   // Determine which modes are present in the results
-  const presentModes = new Set(trains.map(t => t.transportType || getTransportMode(t.route)));
+  const presentModes = new Set(trains.map(getDepartureMode));
 
   // Only show chips that have matching trains
   const visibleChips = MODE_CHIPS.filter(c => presentModes.has(c.mode));

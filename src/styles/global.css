@@ -196,7 +196,7 @@ body {
 .route-card-grid {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 10px;
+  gap: 12px;
   padding: 8px var(--space-lg) var(--space-lg);
 }
 
@@ -205,6 +205,9 @@ body {
 .route-card-wrapper {
   animation: card-enter 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
   position: relative;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .route-card {
@@ -220,9 +223,10 @@ body {
   cursor: pointer;
   text-align: left;
   width: 100%;
-  min-height: 112px;
-  height: 112px;
-  max-height: 112px;
+  max-width: 100%;
+  min-height: 136px;
+  height: 136px;
+  max-height: 136px;
   font-family: inherit;
   overflow: hidden;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
@@ -257,6 +261,8 @@ body {
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
+  width: 100%;
+  min-height: 70px;
   min-width: 0;
 }
 
@@ -265,8 +271,8 @@ body {
   align-items: flex-start;
   gap: 10px;
   min-width: 0;
-  flex-shrink: 0;
-  flex: 1;
+  flex: 1 1 auto;
+  max-width: 100%;
 }
 
 .route-card-icon {
@@ -286,6 +292,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  max-width: 100%;
   min-width: 0;
 }
 
@@ -306,6 +313,7 @@ body {
   align-items: center;
   gap: 5px;
   width: fit-content;
+  max-width: 100%;
   padding: 5px 9px;
   border: 1px solid var(--border);
   border-radius: 999px;
@@ -313,6 +321,9 @@ body {
   font-weight: 700;
   color: var(--muted);
   background: var(--panel);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .route-card-badge-dot {
@@ -393,8 +404,9 @@ body {
   flex-direction: column;
   align-items: flex-end;
   gap: 3px;
-  min-width: 124px;
-  max-width: 45%;
+  width: 132px;
+  min-width: 104px;
+  max-width: 44%;
   text-align: right;
   flex-shrink: 0;
 }
@@ -412,6 +424,7 @@ body {
   font-weight: 800;
   color: var(--text);
   line-height: 1.2;
+  max-width: 100%;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -422,6 +435,9 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  min-height: 32px;
+  width: 100%;
+  min-width: 0;
 }
 
 .route-card-chevron {

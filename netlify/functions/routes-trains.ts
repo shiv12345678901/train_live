@@ -159,15 +159,19 @@ const handler: Handler = async (event) => {
           });
         }
 
-        departures.sort((a, b) => new Date(a.scheduledTime).getTime() - new Date(b.scheduledTime).getTime());
-        return { statusCode: 200, body: JSON.stringify(departures.slice(0, 30)) };
+        if (departures.length > 0) {
+          departures.sort((a, b) => new Date(a.scheduledTime).getTime() - new Date(b.scheduledTime).getTime());
+          return { statusCode: 200, body: JSON.stringify(departures.slice(0, 30)) };
+        }
       }
     }
 
     // Fallback: try Trip Planner API
+    const originType = originStopId ? 'stop' : 'any';
+    const originName = originStopId || origin;
     const destinationType = destinationStopId ? 'stop' : 'any';
     const destinationName = destinationStopId || destination;
-    const tripUrl = `https://api.transport.nsw.gov.au/v1/tp/trip?outputFormat=rapidJSON&coordOutputFormat=EPSG%3A4326&depArrMacro=dep&type_origin=any&name_origin=${encodeURIComponent(origin)}&type_destination=${destinationType}&name_destination=${encodeURIComponent(destinationName)}&calcNumberOfTrips=6&TfNSWTR=true&version=10.2.1.42`;
+    const tripUrl = `https://api.transport.nsw.gov.au/v1/tp/trip?outputFormat=rapidJSON&coordOutputFormat=EPSG%3A4326&depArrMacro=dep&type_origin=${originType}&name_origin=${encodeURIComponent(originName)}&type_destination=${destinationType}&name_destination=${encodeURIComponent(destinationName)}&calcNumberOfTrips=6&TfNSWTR=true&version=10.2.1.42`;
 
     const tripResponse = await fetchWithTimeout(tripUrl, {
       headers: { 'Authorization': `apikey ${apiKey}` },
@@ -175,19 +179,25 @@ const handler: Handler = async (event) => {
 
     if (!tripResponse.ok) {
       // Fallback to departure monitor
-      return await fallbackDepartureMon(apiKey, origin, destination);
+      return await fallbackDepartureMon(apiKey, origin, destination, originStopId, destinationStopId);
     }
 
     const tripData = (await tripResponse.json()) as Record<string, unknown>;
     const journeys = (tripData?.journeys || []) as Array<Record<string, unknown>>;
 
     const departures: TrainDeparture[] = [];
+    const seenTrips = new Set<string>();
 
     for (const journey of journeys) {
       const legs = (journey.legs || []) as Array<Record<string, unknown>>;
-      if (legs.length !== 1) continue; // Direct services only
+      const transitLegs = legs.filter((candidate) => {
+        const candidateTransportation = (candidate.transportation || {}) as Record<string, unknown>;
+        const candidateProduct = (candidateTransportation.product || {}) as Record<string, unknown>;
+        return Number(candidateProduct.class) !== 100;
+      });
+      if (transitLegs.length !== 1) continue; // Direct service, allowing walk/access legs.
 
-      const leg = legs[0];
+      const leg = transitLegs[0];
       const transportation = (leg.transportation || {}) as Record<string, unknown>;
       const product = (transportation.product || {}) as Record<string, unknown>;
       if ((product.class as number) === 100) continue; // Skip walking
@@ -214,7 +224,11 @@ const handler: Handler = async (event) => {
 
       const productClass = product.class as number || 0;
       const productName = (product.name as string) || '';
-      departures.push({ tripId, route: line, platform, scheduledTime, estimatedTime, status, delayMinutes, cancelled: isCancelled, transportType: detectTransportType(productClass, productName, line), alerts: [] });
+      const transportType = detectTransportType(productClass, productName, line);
+      const dedupeKey = `${tripId}:${scheduledTime}:${platform}:${transportType}`;
+      if (seenTrips.has(dedupeKey)) continue;
+      seenTrips.add(dedupeKey);
+      departures.push({ tripId, route: line, platform, scheduledTime, estimatedTime, status, delayMinutes, cancelled: isCancelled, transportType, alerts: [] });
     }
 
     departures.sort((a, b) => new Date(a.scheduledTime).getTime() - new Date(b.scheduledTime).getTime());
@@ -225,8 +239,16 @@ const handler: Handler = async (event) => {
   }
 };
 
-async function fallbackDepartureMon(apiKey: string, origin: string, destination: string) {
-  const apiUrl = `https://api.transport.nsw.gov.au/v1/tp/departure_mon?outputFormat=rapidJSON&coordOutputFormat=EPSG%3A4326&mode=direct&type_dm=stop&name_dm=${encodeURIComponent(origin)}&departureMonitorMacro=true&TfNSWDM=true&version=10.2.1.42`;
+async function fallbackDepartureMon(
+  apiKey: string,
+  origin: string,
+  destination: string,
+  originStopId?: string,
+  destinationStopId?: string
+) {
+  const dmType = originStopId ? 'stop' : 'any';
+  const dmName = originStopId || origin;
+  const apiUrl = `https://api.transport.nsw.gov.au/v1/tp/departure_mon?outputFormat=rapidJSON&coordOutputFormat=EPSG%3A4326&mode=direct&type_dm=${dmType}&name_dm=${encodeURIComponent(dmName)}&departureMonitorMacro=true&TfNSWDM=true&version=10.2.1.42`;
 
   const response = await fetchWithTimeout(apiUrl, { headers: { 'Authorization': `apikey ${apiKey}` } });
   if (!response.ok) {
@@ -240,9 +262,8 @@ async function fallbackDepartureMon(apiKey: string, origin: string, destination:
   for (const stopEvent of events.slice(0, 30)) {
     const transportation = (stopEvent.transportation || {}) as Record<string, unknown>;
     const line = (transportation.disassembledName || transportation.number || '') as string;
-    const transportDest = (transportation.destination || {}) as Record<string, string>;
-    const destStop = transportDest.name || '';
-    if (!matchesDestination(destStop, destination)) continue;
+    const transportDest = (transportation.destination || {}) as Record<string, unknown>;
+    if (!serviceMatchesDestination(transportDest, destination, destinationStopId)) continue;
 
     const scheduledTime = (stopEvent.departureTimePlanned as string) || '';
     const estimatedTime = (stopEvent.departureTimeEstimated as string) || undefined;

@@ -7,3 +7,6 @@ export function getTransportMode(route: string): string {
   return 'train';
 }
 
+export function getDepartureMode(departure: { route: string; transportType?: string }): string {
+  return departure.transportType || getTransportMode(departure.route);
+}

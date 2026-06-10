@@ -5,9 +5,6 @@ export function detectTransportType(productClass: number, productName: string, l
   const name = productName.toLowerCase();
   const route = line.toLowerCase();
 
-  if (productClass === 5 || productClass === 7 || name.includes('bus') || /^\d+$/.test(route) || route.startsWith('bus')) {
-    return 'bus';
-  }
   if (productClass === 2 || name.includes('metro') || /^m\d/.test(route)) {
     return 'metro';
   }
@@ -16,6 +13,12 @@ export function detectTransportType(productClass: number, productName: string, l
   }
   if (productClass === 9 || name.includes('ferry') || /^f\d/.test(route)) {
     return 'ferry';
+  }
+  if (name.includes('train') || name.includes('intercity') || /^t\d/.test(route)) {
+    return 'train';
+  }
+  if (productClass === 5 || productClass === 7 || name.includes('bus') || /^\d+$/.test(route) || route.startsWith('bus')) {
+    return 'bus';
   }
   return 'train';
 }
@@ -52,4 +55,3 @@ export function matchesDestination(serviceDestination: string, targetDestination
 
   return service.includes(target) || target.includes(service) || (service.includes('via') && service.includes(target)) || cityMatch;
 }
-
