@@ -24,11 +24,11 @@ export function RouteDetailsPage() {
   const trains = id ? liveTrains[id] ?? [] : [];
   const isLoading = id ? liveTrainsLoading[id] ?? false : false;
   const error = id ? liveTrainsError[id] ?? null : null;
-  const [filterState, setFilterState] = useState({ routeFilter: 'all', visibleCount: 5 });
+  const [filterState, setFilterState] = useState({ routeFilter: 'all', serviceLimit: 5 });
   const [selectedTrain, setSelectedTrain] = useState<TrainDeparture | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [routesLoaded, setRoutesLoaded] = useState(routeCards.length > 0);
-  const { routeFilter, visibleCount } = filterState;
+  const { routeFilter, serviceLimit } = filterState;
 
   const uniqueTrains = trains.filter((train, index, list) => {
     const key = `${train.tripId}:${train.scheduledTime}:${train.platform}:${getDepartureMode(train)}`;
@@ -39,15 +39,14 @@ export function RouteDetailsPage() {
     ? uniqueTrains
     : uniqueTrains.filter(t => getDepartureMode(t) === routeFilter);
 
-  // Show visibleCount results
-  const displayTrains = filteredTrains.slice(0, visibleCount);
-  const hasMore = filteredTrains.length > visibleCount;
+  const displayTrains = filteredTrains;
+  const hasMore = uniqueTrains.length >= serviceLimit;
 
   const refreshLiveTrains = useCallback(async () => {
     if (!id || !card) return;
-    await fetchLiveTrains(id);
+    await fetchLiveTrains(id, serviceLimit);
     setLastUpdated(new Date());
-  }, [card, fetchLiveTrains, id]);
+  }, [card, fetchLiveTrains, id, serviceLimit]);
 
   useEffect(() => {
     let cancelled = false;
@@ -61,9 +60,9 @@ export function RouteDetailsPage() {
 
   useEffect(() => {
     if (id && card) {
-      void fetchLiveTrains(id).finally(() => setLastUpdated(new Date()));
+      void fetchLiveTrains(id, serviceLimit).finally(() => setLastUpdated(new Date()));
     }
-  }, [id, card, fetchLiveTrains]);
+  }, [id, card, fetchLiveTrains, serviceLimit]);
 
   useEffect(() => {
     if (!id || !card) return;
@@ -107,7 +106,11 @@ export function RouteDetailsPage() {
   };
 
   const handleFilter = (nextFilter: string) => {
-    setFilterState({ routeFilter: nextFilter, visibleCount: 5 });
+    setFilterState({ routeFilter: nextFilter, serviceLimit: 5 });
+  };
+
+  const handleLoadMore = () => {
+    setFilterState((prev) => ({ ...prev, serviceLimit: prev.serviceLimit + 5 }));
   };
 
   const updatedLabel = lastUpdated
@@ -181,7 +184,7 @@ export function RouteDetailsPage() {
         {!isLoading && !error && hasMore && (
           <button
             className="btn-secondary load-more-btn"
-            onClick={() => setFilterState((prev) => ({ ...prev, visibleCount: prev.visibleCount + 5 }))}
+            onClick={handleLoadMore}
             type="button"
           >
             Show more

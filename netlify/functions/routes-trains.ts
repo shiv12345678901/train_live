@@ -80,6 +80,10 @@ const handler: Handler = async (event) => {
     const destination = event.queryStringParameters?.destination || '';
     const originStopId = event.queryStringParameters?.originStopId || '';
     const destinationStopId = event.queryStringParameters?.destinationStopId || '';
+    const requestedLimit = Number(event.queryStringParameters?.limit || 5);
+    const resultLimit = Number.isFinite(requestedLimit)
+      ? Math.min(Math.max(Math.round(requestedLimit), 5), 50)
+      : 5;
 
     if (!origin || !destination) {
       return { statusCode: 400, body: JSON.stringify({ error: 'Origin and destination query params are required' }) };
@@ -175,7 +179,7 @@ const handler: Handler = async (event) => {
 
         if (departures.length > 0) {
           departures.sort((a, b) => new Date(a.scheduledTime).getTime() - new Date(b.scheduledTime).getTime());
-          return { statusCode: 200, body: JSON.stringify(departures.slice(0, 30)) };
+          return { statusCode: 200, body: JSON.stringify(departures.slice(0, resultLimit)) };
         }
       }
     }
@@ -185,7 +189,8 @@ const handler: Handler = async (event) => {
     const originName = originStopId || origin;
     const destinationType = destinationStopId ? 'stop' : 'any';
     const destinationName = destinationStopId || destination;
-    const tripUrl = `https://api.transport.nsw.gov.au/v1/tp/trip?outputFormat=rapidJSON&coordOutputFormat=EPSG%3A4326&depArrMacro=dep&type_origin=${originType}&name_origin=${encodeURIComponent(originName)}&type_destination=${destinationType}&name_destination=${encodeURIComponent(destinationName)}&calcNumberOfTrips=6&TfNSWTR=true&version=10.2.1.42`;
+    const tripCount = Math.min(Math.max(resultLimit + 2, 6), 20);
+    const tripUrl = `https://api.transport.nsw.gov.au/v1/tp/trip?outputFormat=rapidJSON&coordOutputFormat=EPSG%3A4326&depArrMacro=dep&type_origin=${originType}&name_origin=${encodeURIComponent(originName)}&type_destination=${destinationType}&name_destination=${encodeURIComponent(destinationName)}&calcNumberOfTrips=${tripCount}&TfNSWTR=true&version=10.2.1.42`;
 
     const tripResponse = await fetchWithTimeout(tripUrl, {
       headers: { 'Authorization': `apikey ${apiKey}` },
@@ -193,7 +198,7 @@ const handler: Handler = async (event) => {
 
     if (!tripResponse.ok) {
       // Fallback to departure monitor
-      return await fallbackDepartureMon(apiKey, origin, destination, originStopId, destinationStopId);
+      return await fallbackDepartureMon(apiKey, origin, destination, originStopId, destinationStopId, resultLimit);
     }
 
     const tripData = (await tripResponse.json()) as Record<string, unknown>;
@@ -247,7 +252,7 @@ const handler: Handler = async (event) => {
     }
 
     departures.sort((a, b) => new Date(a.scheduledTime).getTime() - new Date(b.scheduledTime).getTime());
-    return { statusCode: 200, body: JSON.stringify(departures.slice(0, 30)) };
+    return { statusCode: 200, body: JSON.stringify(departures.slice(0, resultLimit)) };
   } catch (error) {
     const msg = error instanceof Error ? error.message : 'Unknown error';
     return { statusCode: 500, body: JSON.stringify({ error: 'Failed to fetch live trains', detail: msg }) };
@@ -259,7 +264,8 @@ async function fallbackDepartureMon(
   origin: string,
   destination: string,
   originStopId?: string,
-  destinationStopId?: string
+  destinationStopId?: string,
+  resultLimit = 5
 ) {
   const dmType = originStopId ? 'stop' : 'any';
   const dmName = originStopId || origin;
@@ -274,7 +280,7 @@ async function fallbackDepartureMon(
   const departures: TrainDeparture[] = [];
   const events = ((data?.stopEvents || []) as Array<Record<string, unknown>>);
 
-  for (const stopEvent of events.slice(0, 30)) {
+  for (const stopEvent of events.slice(0, Math.max(resultLimit + 20, 30))) {
     const transportation = (stopEvent.transportation || {}) as Record<string, unknown>;
     const line = (transportation.disassembledName || transportation.number || '') as string;
     const transportDest = (transportation.destination || {}) as Record<string, unknown>;
@@ -296,7 +302,7 @@ async function fallbackDepartureMon(
   }
 
   departures.sort((a, b) => new Date(a.scheduledTime).getTime() - new Date(b.scheduledTime).getTime());
-  return { statusCode: 200, body: JSON.stringify(departures.slice(0, 30)) };
+  return { statusCode: 200, body: JSON.stringify(departures.slice(0, resultLimit)) };
 }
 
 export { handler };

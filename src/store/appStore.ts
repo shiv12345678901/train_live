@@ -25,7 +25,7 @@ interface AppState {
   liveTrains: Record<string, TrainDeparture[]>;
   liveTrainsLoading: Record<string, boolean>;
   liveTrainsError: Record<string, string | null>;
-  fetchLiveTrains: (routeId: string) => Promise<void>;
+  fetchLiveTrains: (routeId: string, limit?: number) => Promise<void>;
 
   // Alert Schedules
   alertSchedules: AlertSchedule[];
@@ -234,7 +234,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
   liveTrainsLoading: {},
   liveTrainsError: {},
 
-  fetchLiveTrains: async (routeId) => {
+  fetchLiveTrains: async (routeId, limit) => {
     set((state) => ({
       liveTrainsLoading: { ...state.liveTrainsLoading, [routeId]: true },
       liveTrainsError: { ...state.liveTrainsError, [routeId]: null },
@@ -249,7 +249,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
       const originStopId = card?.originStopId;
       const destinationStopId = card?.destinationStopId;
 
-      const trains = await apiFetchLiveTrains(routeId, origin, destination, originStopId, destinationStopId);
+      const trains = await apiFetchLiveTrains(routeId, origin, destination, originStopId, destinationStopId, limit);
       set((state) => ({
         liveTrains: { ...state.liveTrains, [routeId]: trains },
         liveTrainsLoading: { ...state.liveTrainsLoading, [routeId]: false },

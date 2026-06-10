@@ -222,7 +222,7 @@ body {
   flex-direction: column;
   justify-content: space-between;
   gap: 12px;
-  padding: 20px 17px 18px 16px;
+  padding: 20px 36px 18px 16px;
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 13px;
@@ -266,7 +266,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
   width: 100%;
   min-height: 55px;
   min-width: 0;
@@ -416,9 +416,10 @@ body {
   flex-direction: column;
   align-items: flex-end;
   gap: 6px;
-  width: 126px;
-  min-width: 94px;
-  max-width: 38%;
+  width: 108px;
+  min-width: 90px;
+  max-width: 36%;
+  margin-right: 10px;
   text-align: right;
   flex-shrink: 0;
 }
@@ -432,7 +433,7 @@ body {
 }
 
 .route-card-next-value {
-  font-size: 25px;
+  font-size: 21px;
   font-weight: 800;
   color: var(--text);
   line-height: 1;
@@ -443,7 +444,7 @@ body {
 }
 
 .route-card-next-detail {
-  font-size: 18px;
+  font-size: 15px;
   font-weight: 500;
   color: var(--muted);
   line-height: 1.1;
@@ -451,6 +452,36 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.route-card--late {
+  border-color: #fed7aa;
+  background: linear-gradient(180deg, #fffaf4 0%, var(--bg) 58%);
+}
+
+.route-card--late .route-card-next-value,
+.route-card--late .route-card-next-detail {
+  color: #c2410c;
+}
+
+.route-card--cancelled {
+  border-color: #fecaca;
+  background: linear-gradient(180deg, #fff5f5 0%, var(--bg) 58%);
+}
+
+.route-card--cancelled .route-card-next-value,
+.route-card--cancelled .route-card-next-detail {
+  color: #b91c1c;
+}
+
+.route-card--notice {
+  border-color: #bfdbfe;
+  background: linear-gradient(180deg, #f5f9ff 0%, var(--bg) 58%);
+}
+
+.route-card--notice .route-card-next-value,
+.route-card--notice .route-card-next-detail {
+  color: #2563eb;
 }
 
 .route-card-status-row {
@@ -477,7 +508,7 @@ body {
   flex-shrink: 0;
   position: absolute;
   top: 50%;
-  right: 14px;
+  right: 12px;
   transform: translateY(-50%);
 }
 
@@ -1758,7 +1789,12 @@ body {
     padding: 0 var(--space-sm) var(--space-sm);
   }
   .route-card {
-    padding: 18px 14px 16px;
+    padding: 18px 32px 16px 14px;
+  }
+  .route-card-next {
+    width: 100px;
+    min-width: 84px;
+    margin-right: 8px;
   }
   .home-header {
     padding: 28px var(--space-sm) 20px;
@@ -1773,10 +1809,10 @@ body {
     font-size: 15px;
   }
   .route-card-next-value {
-    font-size: 22px;
+    font-size: 20px;
   }
   .route-card-next-detail {
-    font-size: 16px;
+    font-size: 14px;
   }
   .train-card-time {
     font-size: 22px;

@@ -11,13 +11,15 @@ export async function fetchLiveTrains(
   origin?: string,
   destination?: string,
   originStopId?: string,
-  destinationStopId?: string
+  destinationStopId?: string,
+  limit?: number
 ): Promise<TrainDeparture[]> {
   const params = new URLSearchParams({ id: routeId });
   if (origin) params.set('origin', origin);
   if (destination) params.set('destination', destination);
   if (originStopId) params.set('originStopId', originStopId);
   if (destinationStopId) params.set('destinationStopId', destinationStopId);
+  if (limit) params.set('limit', String(limit));
 
   return requestJson<TrainDeparture[]>(`/routes-trains?${params.toString()}`);
 }

@@ -24,14 +24,14 @@ function getMinutesUntil(isoTime: string): string {
   return `${minutes} min`;
 }
 
-function getNextService(train?: TrainDeparture): { time: string; detail: string } {
-  if (!train) return { time: 'Live', detail: 'Tap for times' };
+function getNextService(train?: TrainDeparture): { time: string; detail: string; tone: 'normal' | 'late' | 'cancelled' | 'notice' } {
+  if (!train) return { time: 'Live', detail: 'Tap for times', tone: 'notice' };
   const displayTime = train.estimatedTime || train.scheduledTime;
   const time = formatTime(displayTime);
-  if (train.cancelled) return { time, detail: 'Cancelled' };
-  if (train.status === 'delayed' && train.delayMinutes) return { time, detail: `${train.delayMinutes} min late` };
-  if (train.status === 'unknown') return { time, detail: 'No live update' };
-  return { time, detail: getMinutesUntil(displayTime) };
+  if (train.cancelled) return { time, detail: 'Cancelled', tone: 'cancelled' };
+  if (train.status === 'delayed') return { time, detail: `${train.delayMinutes || '?'} min late`, tone: 'late' };
+  if (train.status === 'unknown') return { time, detail: 'No live update', tone: 'notice' };
+  return { time, detail: getMinutesUntil(displayTime), tone: 'normal' };
 }
 
 export function RouteCard({ card, alertStatus, nextTrain, onClick, onEdit, onDelete, index = 0 }: RouteCardProps) {
@@ -89,7 +89,7 @@ export function RouteCard({ card, alertStatus, nextTrain, onClick, onEdit, onDel
   return (
     <div className="route-card-wrapper" style={{ animationDelay: `${index * 80}ms` }}>
       <button
-        className="route-card"
+        className={`route-card route-card--${nextService.tone}`}
         onClick={handleClick}
         onPointerDown={handlePointerDown}
         onPointerUp={handlePointerUp}
