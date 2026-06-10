@@ -87,7 +87,9 @@ export function HomeScreen() {
   return (
     <div className="home-screen">
       <header className="home-header">
-        <h1 className="home-header-title">{getGreeting()}</h1>
+        <h1 className="home-header-title">
+          {getGreeting()} <span className="home-header-wave" aria-hidden="true">👋</span>
+        </h1>
         <p className="home-header-subtitle">Your routes</p>
       </header>
       <RouteCardGrid

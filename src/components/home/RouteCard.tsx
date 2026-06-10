@@ -17,12 +17,21 @@ function formatTime(isoTime: string): string {
   return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
 }
 
-function getNextLabel(train?: TrainDeparture): string {
-  if (!train) return 'Tap for live times';
-  const time = formatTime(train.estimatedTime || train.scheduledTime);
-  if (train.cancelled) return `${time} cancelled`;
-  if (train.status === 'delayed' && train.delayMinutes) return `${time} · ${train.delayMinutes} min late`;
-  return `${time} · ${train.status === 'unknown' ? 'Live status unavailable' : 'On time'}`;
+function getMinutesUntil(isoTime: string): string {
+  const date = new Date(isoTime);
+  if (Number.isNaN(date.getTime())) return '';
+  const minutes = Math.max(0, Math.round((date.getTime() - Date.now()) / 60000));
+  return `${minutes} min`;
+}
+
+function getNextService(train?: TrainDeparture): { time: string; detail: string } {
+  if (!train) return { time: 'Live', detail: 'Tap for times' };
+  const displayTime = train.estimatedTime || train.scheduledTime;
+  const time = formatTime(displayTime);
+  if (train.cancelled) return { time, detail: 'Cancelled' };
+  if (train.status === 'delayed' && train.delayMinutes) return { time, detail: `${train.delayMinutes} min late` };
+  if (train.status === 'unknown') return { time, detail: 'No live update' };
+  return { time, detail: getMinutesUntil(displayTime) };
 }
 
 export function RouteCard({ card, alertStatus, nextTrain, onClick, onEdit, onDelete, index = 0 }: RouteCardProps) {
@@ -37,7 +46,7 @@ export function RouteCard({ card, alertStatus, nextTrain, onClick, onEdit, onDel
   const shortOrigin = shorten(card.origin);
   const shortDest = shorten(card.destination);
   const isActive = alertStatus === 'Alert set';
-  const nextLabel = getNextLabel(nextTrain);
+  const nextService = getNextService(nextTrain);
 
   const [showMenu, setShowMenu] = useState(false);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -104,13 +113,17 @@ export function RouteCard({ card, alertStatus, nextTrain, onClick, onEdit, onDel
             </div>
           </div>
           <div className="route-card-next">
-            <span className="route-card-next-label">Next</span>
-            <span className="route-card-next-value">{nextLabel}</span>
+            <span className="route-card-next-value">{nextService.time}</span>
+            <span className="route-card-next-detail">{nextService.detail}</span>
           </div>
         </div>
         <div className="route-card-status-row">
           <div className={`route-card-badge ${isActive ? 'is-active' : ''}`}>
-            <span className="route-card-badge-dot" />
+            <svg className="route-card-badge-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 7h11" />
+              <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+              {!isActive && <path d="M2 2l20 20" />}
+            </svg>
             {alertStatus}
           </div>
           <span className="route-card-chevron" aria-hidden="true">›</span>
