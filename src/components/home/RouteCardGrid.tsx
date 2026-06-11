@@ -28,6 +28,7 @@ interface RouteCardGridProps {
   onReorder: (cardIds: string[]) => void;
   onEdit?: (card: RouteCardType) => void;
   onDelete?: (card: RouteCardType) => void;
+  onPin?: (card: RouteCardType) => void;
 }
 
 interface SortableRouteCardProps {
@@ -38,9 +39,10 @@ interface SortableRouteCardProps {
   onClick: () => void;
   onEdit?: () => void;
   onDelete?: () => void;
+  onPin?: () => void;
 }
 
-function SortableRouteCard({ id, card, alertStatus, nextTrain, onClick, onEdit, onDelete }: SortableRouteCardProps) {
+function SortableRouteCard({ id, card, alertStatus, nextTrain, onClick, onEdit, onDelete, onPin }: SortableRouteCardProps) {
   const {
     attributes,
     listeners,
@@ -57,7 +59,7 @@ function SortableRouteCard({ id, card, alertStatus, nextTrain, onClick, onEdit, 
   return (
     <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
       {card ? (
-        <RouteCard card={card} alertStatus={alertStatus} nextTrain={nextTrain} onClick={onClick} onEdit={onEdit} onDelete={onDelete} />
+        <RouteCard card={card} alertStatus={alertStatus} nextTrain={nextTrain} onClick={onClick} onEdit={onEdit} onDelete={onDelete} onPin={onPin} />
       ) : (
         <AddNewCard onClick={onClick} />
       )}
@@ -81,8 +83,16 @@ export function RouteCardGrid({
   onReorder,
   onEdit,
   onDelete,
+  onPin,
 }: RouteCardGridProps) {
-  const sortableIds = [...cards.map((c) => c.id), ADD_NEW_ID];
+  // Sort: pinned cards first, then by order
+  const sortedCards = [...cards].sort((a, b) => {
+    if (a.pinned && !b.pinned) return -1;
+    if (!a.pinned && b.pinned) return 1;
+    return 0;
+  });
+
+  const sortableIds = [...sortedCards.map((c) => c.id), ADD_NEW_ID];
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -137,6 +147,7 @@ export function RouteCardGrid({
                 onClick={() => onCardClick(card.id)}
                 onEdit={onEdit ? () => onEdit(card) : undefined}
                 onDelete={onDelete ? () => onDelete(card) : undefined}
+                onPin={onPin ? () => onPin(card) : undefined}
               />
             );
           })}

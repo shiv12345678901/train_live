@@ -1,8 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { RouteCardGrid } from './RouteCardGrid';
 import { RouteCreationSheet } from './RouteCreationSheet';
 import { useAppStore } from '@/store/appStore';
+import { toast } from '@/components/shared/Toast';
+import { hapticLight, hapticSuccess } from '@/lib/haptics';
+import { usePullToRefresh } from '@/hooks/usePullToRefresh';
 import type { RouteCard as RouteCardType, TransportMode } from '@/types';
 
 function getGreeting(): string {
@@ -28,13 +31,27 @@ export function HomeScreen() {
   } = useAppStore();
   const [showCreation, setShowCreation] = useState(false);
   const [editingCard, setEditingCard] = useState<RouteCardType | null>(null);
+  const [initialLoading, setInitialLoading] = useState(routeCards.length === 0);
   const refreshTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Pull-to-refresh
+  const handleRefresh = useCallback(async () => {
+    hapticLight();
+    const refreshPromises = routeCards.map((card) => fetchLiveTrains(card.id));
+    await Promise.allSettled(refreshPromises);
+    hapticSuccess();
+    toast('Refreshed', 'success', 2000);
+  }, [fetchLiveTrains, routeCards]);
+
+  const { containerRef, pullDistance, isRefreshing } = usePullToRefresh({
+    onRefresh: handleRefresh,
+  });
+
   useEffect(() => {
-    loadRouteCards();
+    loadRouteCards().finally(() => setInitialLoading(false));
   }, [loadRouteCards]);
 
-  // Initial fetch for ALL cards (not just first 4)
+  // Initial fetch for ALL cards
   useEffect(() => {
     for (const card of routeCards) {
       if (!liveTrains[card.id] && !liveTrainsLoading[card.id]) {
@@ -62,6 +79,19 @@ export function HomeScreen() {
   }, [fetchLiveTrains, routeCards]);
 
   const handleSave = async (data: { title: string; origin: string; destination: string; mode: TransportMode; routeFilter: string[]; originStopId?: string; destinationStopId?: string }) => {
+    // Duplicate route prevention (feature 29)
+    if (!editingCard) {
+      const isDuplicate = routeCards.some(
+        (card) =>
+          card.origin.trim().toLowerCase() === data.origin.trim().toLowerCase() &&
+          card.destination.trim().toLowerCase() === data.destination.trim().toLowerCase()
+      );
+      if (isDuplicate) {
+        toast('A route with the same origin and destination already exists', 'info', 4000);
+        // Still allow creation — just warn
+      }
+    }
+
     if (editingCard) {
       await updateRouteCard(editingCard.id, {
         title: data.title,
@@ -73,6 +103,8 @@ export function HomeScreen() {
         routeFilter: data.routeFilter,
       });
       setEditingCard(null);
+      hapticSuccess();
+      toast('Route updated', 'success');
     } else {
       await saveRouteCard({
         title: data.title,
@@ -86,7 +118,21 @@ export function HomeScreen() {
         enabled: true,
       });
       setShowCreation(false);
+      hapticSuccess();
+      toast('Route created', 'success');
     }
+  };
+
+  const handleDelete = (card: RouteCardType) => {
+    deleteRouteCard(card.id);
+    hapticLight();
+    toast('Route deleted', 'info');
+  };
+
+  const handlePin = (card: RouteCardType) => {
+    updateRouteCard(card.id, { pinned: !card.pinned });
+    hapticLight();
+    toast(card.pinned ? 'Unpinned' : 'Pinned to top', 'success', 2000);
   };
 
   if (showCreation || editingCard) {
@@ -107,23 +153,51 @@ export function HomeScreen() {
   }
 
   return (
-    <div className="home-screen">
+    <div className="home-screen" ref={containerRef}>
+      {/* Pull-to-refresh indicator */}
+      <div
+        className={`pull-to-refresh ${isRefreshing ? 'is-refreshing' : ''}`}
+        style={{ height: pullDistance > 0 ? `${pullDistance}px` : '0px' }}
+      >
+        <div className={`pull-spinner ${pullDistance > 60 ? 'ready' : ''}`}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+            <path d="M21 12a9 9 0 0 1-15.5 6.2" />
+            <path d="M3 12a9 9 0 0 1 15.5-6.2" />
+            <path d="M18 2v4h-4" />
+            <path d="M6 22v-4h4" />
+          </svg>
+        </div>
+      </div>
+
       <header className="home-header">
         <h1 className="home-header-title">
           {getGreeting()} <span className="home-header-wave" aria-hidden="true">👋</span>
         </h1>
         <p className="home-header-subtitle">Your routes</p>
       </header>
-      <RouteCardGrid
-        cards={routeCards}
-        alertSchedules={alertSchedules}
-        liveTrains={liveTrains}
-        onCardClick={(id) => navigate(`/route/${id}`)}
-        onAddNew={() => setShowCreation(true)}
-        onReorder={(cardIds) => reorderRouteCards(cardIds)}
-        onEdit={(card) => setEditingCard(card)}
-        onDelete={(card) => deleteRouteCard(card.id)}
-      />
+
+      {/* Skeleton loading state (feature 14) */}
+      {initialLoading ? (
+        <div className="home-skeleton">
+          {[0, 1, 2, 3].map((i) => (
+            <div key={i} className="home-skeleton-card" style={{ animationDelay: `${i * 100}ms` }}>
+              <div className="skeleton-shimmer" />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <RouteCardGrid
+          cards={routeCards}
+          alertSchedules={alertSchedules}
+          liveTrains={liveTrains}
+          onCardClick={(id) => { hapticLight(); navigate(`/route/${id}`); }}
+          onAddNew={() => { hapticLight(); setShowCreation(true); }}
+          onReorder={(cardIds) => reorderRouteCards(cardIds)}
+          onEdit={(card) => setEditingCard(card)}
+          onDelete={handleDelete}
+          onPin={handlePin}
+        />
+      )}
     </div>
   );
 }

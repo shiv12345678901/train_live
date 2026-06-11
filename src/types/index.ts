@@ -12,6 +12,7 @@ export type RouteCard = {
   routeFilter: string[];
   order: number;
   enabled: boolean;
+  pinned?: boolean;
   createdAt: string;
   updatedAt: string;
 };

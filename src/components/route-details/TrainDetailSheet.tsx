@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import type { TrainDeparture } from '@/types';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '/.netlify/functions';
@@ -35,6 +35,11 @@ function formatTime(iso: string): string {
 export function TrainDetailSheet({ train, origin, destination, originStopId, destinationStopId, onClose }: TrainDetailSheetProps) {
   const [tripData, setTripData] = useState<TripData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [sheetHeight, setSheetHeight] = useState<'half' | 'full'>('half');
+  const [isClosing, setIsClosing] = useState(false);
+  const dragStartY = useRef(0);
+  const sheetRef = useRef<HTMLDivElement>(null);
+  const isDragging = useRef(false);
 
   useEffect(() => {
     const fetchStops = async () => {
@@ -62,11 +67,62 @@ export function TrainDetailSheet({ train, origin, destination, originStopId, des
     fetchStops();
   }, [destination, destinationStopId, origin, originStopId, train.platform, train.route, train.scheduledTime, train.tripId]);
 
+  // Prevent body scroll when sheet is open
+  useEffect(() => {
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = ''; };
+  }, []);
+
+  const handleClose = useCallback(() => {
+    setIsClosing(true);
+    setTimeout(onClose, 300);
+  }, [onClose]);
+
+  // Draggable handle
+  const handleDragStart = (e: React.TouchEvent) => {
+    dragStartY.current = e.touches[0].clientY;
+    isDragging.current = true;
+  };
+
+  const handleDragMove = (e: React.TouchEvent) => {
+    if (!isDragging.current) return;
+    const deltaY = e.touches[0].clientY - dragStartY.current;
+
+    // Dragging down: close or snap to half
+    if (deltaY > 80) {
+      if (sheetHeight === 'full') {
+        setSheetHeight('half');
+        isDragging.current = false;
+      } else {
+        handleClose();
+        isDragging.current = false;
+      }
+    }
+    // Dragging up: expand to full
+    if (deltaY < -50 && sheetHeight === 'half') {
+      setSheetHeight('full');
+      isDragging.current = false;
+    }
+  };
+
+  const handleDragEnd = () => {
+    isDragging.current = false;
+  };
+
   return (
-    <div className="train-detail-overlay" onClick={onClose}>
-      <div className="train-detail-sheet" onClick={(e) => e.stopPropagation()}>
-        {/* Header */}
-        <div className="train-detail-header">
+    <div className={`train-detail-overlay ${isClosing ? 'closing' : ''}`} onClick={handleClose}>
+      <div
+        ref={sheetRef}
+        className={`train-detail-sheet train-detail-sheet--${sheetHeight} ${isClosing ? 'closing' : ''}`}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Draggable Header */}
+        <div
+          className="train-detail-header"
+          onTouchStart={handleDragStart}
+          onTouchMove={handleDragMove}
+          onTouchEnd={handleDragEnd}
+        >
           <div className="train-detail-handle" />
           <div className="train-detail-title-row">
             <div>
@@ -75,7 +131,7 @@ export function TrainDetailSheet({ train, origin, destination, originStopId, des
                 {tripData?.destination || train.destination || destination.replace(/\s*Station\s*/gi, '')}
               </p>
             </div>
-            <button className="train-detail-close" onClick={onClose} type="button">
+            <button className="train-detail-close" onClick={handleClose} type="button">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
                 <path d="M18 6L6 18M6 6l12 12" />
               </svg>

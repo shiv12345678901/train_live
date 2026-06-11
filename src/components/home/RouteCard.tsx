@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback } from 'react';
 import type { RouteCard as RouteCardType, TrainDeparture, TransportMode } from '@/types';
 import { useCountdown, formatCountdown } from '@/hooks/useCountdown';
+import { hapticMedium } from '@/lib/haptics';
 
 interface RouteCardProps {
   card: RouteCardType;
@@ -8,6 +9,7 @@ interface RouteCardProps {
   nextTrain?: TrainDeparture;
   onClick: () => void;
   onEdit?: () => void;
+  onPin?: () => void;
   onDelete?: () => void;
   index?: number;
 }
@@ -107,12 +109,13 @@ function getCardTone(train?: TrainDeparture): 'normal' | 'late' | 'cancelled' | 
   return 'normal';
 }
 
-export function RouteCard({ card, alertStatus, nextTrain, onClick, onEdit, onDelete, index = 0 }: RouteCardProps) {
+export function RouteCard({ card, alertStatus, nextTrain, onClick, onEdit, onDelete, onPin, index = 0 }: RouteCardProps) {
   const shortOrigin = shortenStopName(card.origin);
   const shortDest = shortenStopName(card.destination);
   const isActive = alertStatus === 'Alert set';
   const mode = card.mode ?? 'train';
   const tone = getCardTone(nextTrain);
+  const isPinned = card.pinned === true;
 
   const displayTime = nextTrain ? (nextTrain.estimatedTime || nextTrain.scheduledTime) : null;
 
@@ -162,7 +165,7 @@ export function RouteCard({ card, alertStatus, nextTrain, onClick, onEdit, onDel
   return (
     <div className="route-card-wrapper" style={{ animationDelay: `${index * 80}ms` }}>
       <button
-        className={`route-card route-card--${tone}`}
+        className={`route-card route-card--${tone} ${isPinned ? 'route-card--pinned' : ''}`}
         onClick={handleClick}
         onPointerDown={handlePointerDown}
         onPointerUp={clearLongPress}
@@ -216,6 +219,18 @@ export function RouteCard({ card, alertStatus, nextTrain, onClick, onEdit, onDel
         <div className="route-card-context-menu">
           <div className="route-card-context-backdrop" onClick={() => setShowMenu(false)} />
           <div className="route-card-context-panel">
+            {onPin && (
+              <button
+                className="route-card-context-item"
+                onClick={() => { setShowMenu(false); hapticMedium(); onPin(); }}
+                type="button"
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 2l3 7h7l-5.5 4 2 7L12 16l-6.5 4 2-7L2 9h7z" />
+                </svg>
+                {isPinned ? 'Unpin route' : 'Pin to top'}
+              </button>
+            )}
             {onEdit && (
               <button
                 className="route-card-context-item"
