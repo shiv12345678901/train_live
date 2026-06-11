@@ -1,6 +1,6 @@
 import type { Handler } from '@netlify/functions';
 import { fetchWithTimeout } from '../../lib/http';
-import { detectTransportType, getTimingStatus, matchesDestination } from '../../lib/trainParsing';
+import { detectTransportType, getTimingStatus, matchesDestination, type TransportType } from '../../lib/trainParsing';
 
 interface TrainDeparture {
   tripId: string;
@@ -14,6 +14,18 @@ interface TrainDeparture {
   cancelled: boolean;
   transportType: 'train' | 'metro' | 'bus' | 'light_rail' | 'ferry';
   alerts: { id: string; title: string; description: string }[];
+}
+
+type RouteMode = TransportType | 'all';
+
+function parseMode(value: string | undefined): RouteMode {
+  return value && ['all', 'train', 'metro', 'bus', 'light_rail', 'ferry'].includes(value)
+    ? value as RouteMode
+    : 'train';
+}
+
+function modeMatches(actual: TransportType, selected: RouteMode): boolean {
+  return selected === 'all' || actual === selected;
 }
 
 function idsMatch(value: unknown, targetId: string): boolean {
@@ -80,6 +92,7 @@ const handler: Handler = async (event) => {
     const destination = event.queryStringParameters?.destination || '';
     const originStopId = event.queryStringParameters?.originStopId || '';
     const destinationStopId = event.queryStringParameters?.destinationStopId || '';
+    const selectedMode = parseMode(event.queryStringParameters?.mode);
     const requestedLimit = Number(event.queryStringParameters?.limit || 5);
     const resultLimit = Number.isFinite(requestedLimit)
       ? Math.min(Math.max(Math.round(requestedLimit), 5), 50)
@@ -143,6 +156,7 @@ const handler: Handler = async (event) => {
           const productClass = product.class as number || 0;
           const productName = (product.name as string) || '';
           const transportType = detectTransportType(productClass, productName, line);
+          if (!modeMatches(transportType, selectedMode)) continue;
 
           const transportDest = (transportation.destination || {}) as Record<string, unknown>;
           if (!stopEventServesDestination(stopEvent, destination, destinationStopId)) continue;
@@ -198,7 +212,7 @@ const handler: Handler = async (event) => {
 
     if (!tripResponse.ok) {
       // Fallback to departure monitor
-      return await fallbackDepartureMon(apiKey, origin, destination, originStopId, destinationStopId, resultLimit);
+      return await fallbackDepartureMon(apiKey, origin, destination, originStopId, destinationStopId, resultLimit, selectedMode);
     }
 
     const tripData = (await tripResponse.json()) as Record<string, unknown>;
@@ -244,6 +258,7 @@ const handler: Handler = async (event) => {
       const productClass = product.class as number || 0;
       const productName = (product.name as string) || '';
       const transportType = detectTransportType(productClass, productName, line);
+      if (!modeMatches(transportType, selectedMode)) continue;
       const dedupeKey = `${tripId}:${scheduledTime}:${platform}:${transportType}`;
       if (seenTrips.has(dedupeKey)) continue;
       seenTrips.add(dedupeKey);
@@ -265,7 +280,8 @@ async function fallbackDepartureMon(
   destination: string,
   originStopId?: string,
   destinationStopId?: string,
-  resultLimit = 5
+  resultLimit = 5,
+  selectedMode: RouteMode = 'train'
 ) {
   const dmType = originStopId ? 'stop' : 'any';
   const dmName = originStopId || origin;
@@ -296,9 +312,11 @@ async function fallbackDepartureMon(
     const product = (transportation.product || {}) as Record<string, unknown>;
     const productClass = product.class as number || 0;
     const productName = (product.name as string) || '';
+    const transportType = detectTransportType(productClass, productName, line);
+    if (!modeMatches(transportType, selectedMode)) continue;
     const { status, delayMinutes } = getTimingStatus(scheduledTime, estimatedTime, isCancelled);
 
-    departures.push({ tripId: (transportation.id as string) || `trip-${departures.length}`, route: line, destination: String(transportDest.name || destination), platform, scheduledTime, estimatedTime, status, delayMinutes, cancelled: isCancelled, transportType: detectTransportType(productClass, productName, line), alerts: [] });
+    departures.push({ tripId: (transportation.id as string) || `trip-${departures.length}`, route: line, destination: String(transportDest.name || destination), platform, scheduledTime, estimatedTime, status, delayMinutes, cancelled: isCancelled, transportType, alerts: [] });
   }
 
   departures.sort((a, b) => new Date(a.scheduledTime).getTime() - new Date(b.scheduledTime).getTime());

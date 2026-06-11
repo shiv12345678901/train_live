@@ -25,6 +25,11 @@ function getStringArray(input: JsonObject, key: string): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 }
 
+function getRouteMode(input: JsonObject): string {
+  const mode = getString(input, 'mode') || 'train';
+  return ['all', 'train', 'metro', 'bus', 'light_rail', 'ferry'].includes(mode) ? mode : 'train';
+}
+
 function getNumberArray(input: JsonObject, key: string): number[] | undefined {
   const value = input[key];
   if (!Array.isArray(value)) return undefined;
@@ -53,6 +58,7 @@ export function routeCreateData(body: JsonObject) {
     originStopId: getString(body, 'originStopId') || null,
     destination,
     destinationStopId: getString(body, 'destinationStopId') || null,
+    mode: getRouteMode(body),
     routeFilter: getStringArray(body, 'routeFilter'),
   };
 }
@@ -70,6 +76,7 @@ export function routeUpdates(body: JsonObject): JsonObject {
   if (destination) updates.destination = destination;
   if ('originStopId' in body) updates.originStopId = originStopId || null;
   if ('destinationStopId' in body) updates.destinationStopId = destinationStopId || null;
+  if ('mode' in body) updates.mode = getRouteMode(body);
   if (Array.isArray(body.routeFilter)) updates.routeFilter = getStringArray(body, 'routeFilter');
   if (typeof body.enabled === 'boolean') updates.enabled = body.enabled;
 

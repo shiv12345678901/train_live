@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback } from 'react';
-import type { RouteCard as RouteCardType, TrainDeparture } from '@/types';
+import type { RouteCard as RouteCardType, TrainDeparture, TransportMode } from '@/types';
 
 interface RouteCardProps {
   card: RouteCardType;
@@ -34,19 +34,56 @@ function getNextService(train?: TrainDeparture): { time: string; detail: string;
   return { time, detail: getMinutesUntil(displayTime), tone: 'normal' };
 }
 
+function RouteModeIcon({ mode }: { mode: TransportMode }) {
+  if (mode === 'bus') {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <rect x="5" y="4" width="14" height="15" rx="2" />
+        <path d="M7 9h10" />
+        <path d="M8 19v2" />
+        <path d="M16 19v2" />
+        <circle cx="8.5" cy="15.5" r="1" fill="currentColor" stroke="none" />
+        <circle cx="15.5" cy="15.5" r="1" fill="currentColor" stroke="none" />
+      </svg>
+    );
+  }
+
+  if (mode === 'light_rail') {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M6 5h12l1 8a4 4 0 0 1-4 4H9a4 4 0 0 1-4-4l1-8Z" />
+        <path d="M8 9h8" />
+        <path d="M9 21l2-4" />
+        <path d="M15 21l-2-4" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="4" y="10" width="16" height="8" rx="2"/>
+      <path d="M4 7a4 4 0 014-4h8a4 4 0 014 4v3H4V7z"/>
+      <circle cx="8" cy="15" r="1.5" fill="currentColor" stroke="none"/>
+      <circle cx="16" cy="15" r="1.5" fill="currentColor" stroke="none"/>
+      <path d="M9 21l1.5-3h3L15 21"/>
+    </svg>
+  );
+}
+
+function shortenStopName(name: string): string {
+  return name
+    .replace(/\s*(Station|Wharf|Light Rail|,\s*.*$)/gi, '')
+    .replace(/\s+at\s+.*$/i, '')
+    .replace(/\s+via\s+.*$/i, '')
+    .trim();
+}
+
 export function RouteCard({ card, alertStatus, nextTrain, onClick, onEdit, onDelete, index = 0 }: RouteCardProps) {
-  // Shorten station names aggressively for card display
-  const shorten = (name: string) => {
-    return name
-      .replace(/\s*(Station|Wharf|Light Rail|,\s*.*$)/gi, '')
-      .replace(/\s+at\s+.*$/i, '')
-      .replace(/\s+via\s+.*$/i, '')
-      .trim();
-  };
-  const shortOrigin = shorten(card.origin);
-  const shortDest = shorten(card.destination);
+  const shortOrigin = shortenStopName(card.origin);
+  const shortDest = shortenStopName(card.destination);
   const isActive = alertStatus === 'Alert set';
   const nextService = getNextService(nextTrain);
+  const mode = card.mode ?? 'train';
 
   const [showMenu, setShowMenu] = useState(false);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -60,14 +97,7 @@ export function RouteCard({ card, alertStatus, nextTrain, onClick, onEdit, onDel
     }, 600);
   }, []);
 
-  const handlePointerUp = useCallback(() => {
-    if (longPressTimer.current) {
-      clearTimeout(longPressTimer.current);
-      longPressTimer.current = null;
-    }
-  }, []);
-
-  const handlePointerLeave = useCallback(() => {
+  const clearLongPress = useCallback(() => {
     if (longPressTimer.current) {
       clearTimeout(longPressTimer.current);
       longPressTimer.current = null;
@@ -92,24 +122,18 @@ export function RouteCard({ card, alertStatus, nextTrain, onClick, onEdit, onDel
         className={`route-card route-card--${nextService.tone}`}
         onClick={handleClick}
         onPointerDown={handlePointerDown}
-        onPointerUp={handlePointerUp}
-        onPointerLeave={handlePointerLeave}
+        onPointerUp={clearLongPress}
+        onPointerLeave={clearLongPress}
         type="button"
       >
         <div className="route-card-main">
           <div className="route-card-header">
             <div className="route-card-icon">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="4" y="10" width="16" height="8" rx="2"/>
-                <path d="M4 7a4 4 0 014-4h8a4 4 0 014 4v3H4V7z"/>
-                <circle cx="8" cy="15" r="1.5" fill="currentColor" stroke="none"/>
-                <circle cx="16" cy="15" r="1.5" fill="currentColor" stroke="none"/>
-                <path d="M9 21l1.5-3h3L15 21"/>
-              </svg>
+              <RouteModeIcon mode={mode === 'all' ? 'train' : mode} />
             </div>
             <div className="route-card-info">
               <h3 className="route-card-title">{card.title}</h3>
-              <p className="route-card-route">{shortOrigin} → {shortDest}</p>
+              <p className="route-card-route">{shortOrigin} <span aria-hidden="true">→</span> {shortDest}</p>
             </div>
           </div>
           <div className="route-card-next">
@@ -130,7 +154,6 @@ export function RouteCard({ card, alertStatus, nextTrain, onClick, onEdit, onDel
         </div>
       </button>
 
-      {/* Context menu (long-press) */}
       {showMenu && (
         <div className="route-card-context-menu">
           <div className="route-card-context-backdrop" onClick={() => setShowMenu(false)} />

@@ -1,3 +1,5 @@
+export type TransportMode = 'all' | 'train' | 'metro' | 'bus' | 'light_rail' | 'ferry';
+
 // Route Card (persisted)
 export type RouteCard = {
   id: string;
@@ -6,6 +8,7 @@ export type RouteCard = {
   originStopId?: string;
   destination: string;
   destinationStopId?: string;
+  mode?: TransportMode;
   routeFilter: string[];
   order: number;
   enabled: boolean;

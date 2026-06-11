@@ -1,9 +1,19 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { StopSearchInput } from './StopSearchInput';
-import type { RouteCard } from '@/types';
+import { fetchLiveTrains } from '@/api/trainApi';
+import type { RouteCard, TransportMode } from '@/types';
+
+const MODE_OPTIONS: Array<{ mode: TransportMode; label: string }> = [
+  { mode: 'train', label: 'Train' },
+  { mode: 'bus', label: 'Bus' },
+  { mode: 'light_rail', label: 'Light rail' },
+  { mode: 'metro', label: 'Metro' },
+  { mode: 'ferry', label: 'Ferry' },
+  { mode: 'all', label: 'All' },
+];
 
 interface RouteCreationSheetProps {
-  onSave: (data: { title: string; origin: string; destination: string; routeFilter: string[]; originStopId?: string; destinationStopId?: string }) => void;
+  onSave: (data: { title: string; origin: string; destination: string; mode: TransportMode; routeFilter: string[]; originStopId?: string; destinationStopId?: string }) => void;
   onCancel: () => void;
   editCard?: RouteCard;
 }
@@ -14,7 +24,50 @@ export function RouteCreationSheet({ onSave, onCancel, editCard }: RouteCreation
   const [originStopId, setOriginStopId] = useState(editCard?.originStopId ?? '');
   const [destination, setDestination] = useState(editCard?.destination ?? '');
   const [destinationStopId, setDestinationStopId] = useState(editCard?.destinationStopId ?? '');
+  const [mode, setMode] = useState<TransportMode>(editCard?.mode ?? 'train');
+  const [availableModes, setAvailableModes] = useState<TransportMode[]>([]);
+  const [modesLoading, setModesLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const canFetchModes = Boolean(origin.trim() && destination.trim() && origin.trim().toLowerCase() !== destination.trim().toLowerCase());
+
+  useEffect(() => {
+    if (!canFetchModes) return;
+
+    let active = true;
+    const timer = window.setTimeout(() => {
+      setModesLoading(true);
+      fetchLiveTrains(
+        '__mode_probe__',
+        origin.trim(),
+        destination.trim(),
+        originStopId || undefined,
+        destinationStopId || undefined,
+        20,
+        'all'
+      )
+        .then((departures) => {
+          if (!active) return;
+          const modes = Array.from(new Set(departures.map((departure) => departure.transportType).filter(Boolean))) as TransportMode[];
+          setAvailableModes(modes);
+        })
+        .catch(() => {
+          if (active) setAvailableModes([]);
+        })
+        .finally(() => {
+          if (active) setModesLoading(false);
+        });
+    }, 350);
+
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [canFetchModes, destination, destinationStopId, origin, originStopId]);
+
+  const visibleModeOptions = useMemo(() => {
+    const modes = new Set<TransportMode>(['train', 'all', mode, ...(canFetchModes ? availableModes : [])]);
+    return MODE_OPTIONS.filter((option) => modes.has(option.mode));
+  }, [availableModes, canFetchModes, mode]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -32,7 +85,7 @@ export function RouteCreationSheet({ onSave, onCancel, editCard }: RouteCreation
       return;
     }
 
-    onSave({ title: title.trim(), origin: origin.trim(), destination: destination.trim(), routeFilter: [], originStopId: originStopId || undefined, destinationStopId: destinationStopId || undefined });
+    onSave({ title: title.trim(), origin: origin.trim(), destination: destination.trim(), mode, routeFilter: [], originStopId: originStopId || undefined, destinationStopId: destinationStopId || undefined });
   };
 
   return (
@@ -60,6 +113,26 @@ export function RouteCreationSheet({ onSave, onCancel, editCard }: RouteCreation
           placeholder="Search station or stop..."
         />
         {errors.destination && <span className="form-error" style={{ marginTop: '-8px', marginBottom: '12px', display: 'block' }}>{errors.destination}</span>}
+        <div className="form-field">
+          <div className="mode-field-header">
+            <label>Mode</label>
+            <span>{canFetchModes && modesLoading ? 'Checking live options' : canFetchModes && availableModes.length > 0 ? 'Live options found' : 'Train is default'}</span>
+          </div>
+          <div className="route-mode-selector" role="radiogroup" aria-label="Transport mode">
+            {visibleModeOptions.map((option) => (
+              <button
+                key={option.mode}
+                type="button"
+                className={`route-mode-option ${mode === option.mode ? 'is-selected' : ''}`}
+                onClick={() => setMode(option.mode)}
+                role="radio"
+                aria-checked={mode === option.mode}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </div>
         <div className="form-actions">
           <button type="button" className="btn-secondary" onClick={onCancel}>Cancel</button>
           <button type="submit" className="btn-primary">Save</button>

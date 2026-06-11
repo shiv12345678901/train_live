@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { TrainCard, ModeFilter } from './TrainCard';
@@ -29,24 +29,28 @@ export function RouteDetailsPage() {
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [routesLoaded, setRoutesLoaded] = useState(routeCards.length > 0);
   const { routeFilter, serviceLimit } = filterState;
+  const savedMode = card?.mode ?? 'train';
+  const cardId = card?.id;
 
   const uniqueTrains = trains.filter((train, index, list) => {
     const key = `${train.tripId}:${train.scheduledTime}:${train.platform}:${getDepartureMode(train)}`;
     return list.findIndex((item) => `${item.tripId}:${item.scheduledTime}:${item.platform}:${getDepartureMode(item)}` === key) === index;
   });
 
-  const filteredTrains = routeFilter === 'all'
+  const filteredTrains = savedMode === 'all' && routeFilter !== 'all'
+    ? uniqueTrains.filter(t => getDepartureMode(t) === routeFilter)
+    : savedMode === 'all'
     ? uniqueTrains
-    : uniqueTrains.filter(t => getDepartureMode(t) === routeFilter);
+    : uniqueTrains.filter(t => getDepartureMode(t) === savedMode);
 
   const displayTrains = filteredTrains;
   const hasMore = uniqueTrains.length >= serviceLimit;
 
-  const refreshLiveTrains = useCallback(async () => {
-    if (!id || !card) return;
+  const refreshLiveTrains = async () => {
+    if (!id || !cardId) return;
     await fetchLiveTrains(id, serviceLimit);
     setLastUpdated(new Date());
-  }, [card, fetchLiveTrains, id, serviceLimit]);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -65,11 +69,11 @@ export function RouteDetailsPage() {
   }, [id, card, fetchLiveTrains, serviceLimit]);
 
   useEffect(() => {
-    if (!id || !card) return;
+    if (!id || !cardId) return;
 
     const refreshIfVisible = () => {
       if (document.visibilityState === 'visible') {
-        void refreshLiveTrains();
+        void fetchLiveTrains(id, serviceLimit).finally(() => setLastUpdated(new Date()));
       }
     };
 
@@ -80,7 +84,7 @@ export function RouteDetailsPage() {
       window.clearInterval(intervalId);
       document.removeEventListener('visibilitychange', refreshIfVisible);
     };
-  }, [card, id, refreshLiveTrains]);
+  }, [cardId, fetchLiveTrains, id, serviceLimit]);
 
   function formatPrefillTime(isoTime: string): string {
     const date = new Date(isoTime);
@@ -157,7 +161,7 @@ export function RouteDetailsPage() {
       <div className="route-details-trains">
         {isLoading && <LoadingSkeleton />}
         {error && <InlineError message={error} onRetry={refreshLiveTrains} />}
-        {!isLoading && !error && uniqueTrains.length > 0 && (
+        {!isLoading && !error && uniqueTrains.length > 0 && savedMode === 'all' && (
           <ModeFilter trains={uniqueTrains} activeFilter={routeFilter} onFilter={handleFilter} />
         )}
         {!isLoading && !error && uniqueTrains.length === 0 && (
@@ -169,8 +173,8 @@ export function RouteDetailsPage() {
         )}
         {!isLoading && !error && uniqueTrains.length > 0 && displayTrains.length === 0 && (
           <div className="route-details-empty-state">
-            <p className="route-details-empty-title">No {routeFilter.replace('_', ' ')} services found</p>
-            <p className="route-details-empty-copy">Try another mode filter or refresh live departures.</p>
+            <p className="route-details-empty-title">No {savedMode === 'all' ? routeFilter : savedMode.replace('_', ' ')} services found</p>
+            <p className="route-details-empty-copy">Refresh live departures or edit the saved route mode.</p>
           </div>
         )}
         {!isLoading && !error && displayTrains.map((train) => (

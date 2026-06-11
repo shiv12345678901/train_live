@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { RouteCardGrid } from './RouteCardGrid';
 import { RouteCreationSheet } from './RouteCreationSheet';
 import { useAppStore } from '@/store/appStore';
-import type { RouteCard as RouteCardType } from '@/types';
+import type { RouteCard as RouteCardType, TransportMode } from '@/types';
 
 function getGreeting(): string {
   const hour = new Date().getHours();
@@ -41,7 +41,7 @@ export function HomeScreen() {
     }
   }, [fetchLiveTrains, liveTrains, liveTrainsLoading, routeCards]);
 
-  const handleSave = async (data: { title: string; origin: string; destination: string; routeFilter: string[]; originStopId?: string; destinationStopId?: string }) => {
+  const handleSave = async (data: { title: string; origin: string; destination: string; mode: TransportMode; routeFilter: string[]; originStopId?: string; destinationStopId?: string }) => {
     if (editingCard) {
       await updateRouteCard(editingCard.id, {
         title: data.title,
@@ -49,6 +49,7 @@ export function HomeScreen() {
         originStopId: data.originStopId,
         destination: data.destination,
         destinationStopId: data.destinationStopId,
+        mode: data.mode,
         routeFilter: data.routeFilter,
       });
       setEditingCard(null);
@@ -59,6 +60,7 @@ export function HomeScreen() {
         originStopId: data.originStopId,
         destination: data.destination,
         destinationStopId: data.destinationStopId,
+        mode: data.mode,
         routeFilter: data.routeFilter,
         order: routeCards.length,
         enabled: true,

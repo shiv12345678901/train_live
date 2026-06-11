@@ -1,4 +1,4 @@
-import type { TrainDeparture } from '@/types';
+import type { TrainDeparture, TransportMode } from '@/types';
 import { requestJson } from './client';
 
 /**
@@ -12,7 +12,8 @@ export async function fetchLiveTrains(
   destination?: string,
   originStopId?: string,
   destinationStopId?: string,
-  limit?: number
+  limit?: number,
+  mode?: TransportMode
 ): Promise<TrainDeparture[]> {
   const params = new URLSearchParams({ id: routeId });
   if (origin) params.set('origin', origin);
@@ -20,6 +21,7 @@ export async function fetchLiveTrains(
   if (originStopId) params.set('originStopId', originStopId);
   if (destinationStopId) params.set('destinationStopId', destinationStopId);
   if (limit) params.set('limit', String(limit));
+  if (mode) params.set('mode', mode);
 
   return requestJson<TrainDeparture[]>(`/routes-trains?${params.toString()}`);
 }
