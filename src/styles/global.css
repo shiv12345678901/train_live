@@ -2363,45 +2363,27 @@ body {
 
 
 /* ─── Page Transitions (Feature 11) ─────────────────────────────────── */
+/* Removed complex key-based transitions that caused double-render jerk.
+   Using simple CSS on .app-main children for smooth feel. */
 
-.page-transition {
-  will-change: opacity, transform;
+.app-main > * {
+  animation: page-appear 0.25s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
-.page-enter {
-  animation: page-fade-in 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-}
-
-.page-exit {
-  animation: page-fade-out 0.15s ease forwards;
-}
-
-@keyframes page-fade-in {
+@keyframes page-appear {
   from {
     opacity: 0;
-    transform: translateY(6px);
+    transform: translateY(8px);
   }
   to {
     opacity: 1;
     transform: translateY(0);
-  }
-}
-
-@keyframes page-fade-out {
-  from {
-    opacity: 1;
-    transform: translateY(0);
-  }
-  to {
-    opacity: 0;
-    transform: translateY(-4px);
   }
 }
 
 /* Reduced motion */
 @media (prefers-reduced-motion: reduce) {
-  .page-enter,
-  .page-exit {
+  .app-main > * {
     animation: none;
   }
 }
@@ -2859,4 +2841,248 @@ body {
   width: 16px;
   height: 16px;
   color: var(--text);
+}
+
+
+/* ─── Trip Planner (Feature 26) ──────────────────────────────────────── */
+
+.trip-planner {
+  position: fixed;
+  inset: 0;
+  z-index: 600;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  max-width: 480px;
+  margin: 0 auto;
+  animation: page-appear 0.25s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.trip-planner-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-xl) var(--space-lg) var(--space-md);
+}
+
+.trip-planner-title {
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+
+.trip-planner-close {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: var(--panel);
+  border-radius: 50%;
+  font-size: 18px;
+  cursor: pointer;
+  color: var(--text);
+}
+
+.trip-planner-form {
+  padding: 0 var(--space-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.trip-planner-results {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-lg);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.trip-planner-result {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+}
+
+.trip-planner-result-left {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.trip-planner-result-route {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.trip-planner-result-dest {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.trip-planner-result-platform {
+  font-size: 11px;
+  color: var(--subtle);
+  font-weight: 500;
+}
+
+.trip-planner-result-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.trip-planner-result-time {
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.trip-planner-result-mins {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--success);
+}
+
+.trip-planner-result-fare {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.trip-planner-empty {
+  padding: 32px 16px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+/* ─── Home Trip Planner Button ───────────────────────────────────────── */
+
+.home-trip-planner-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: clamp(8px, 1.4dvh, 14px);
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: var(--bg);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.home-trip-planner-btn:active {
+  background: var(--panel);
+  border-color: var(--text);
+  color: var(--text);
+  transform: scale(0.96);
+}
+
+/* ─── Quick Glance Widget (Feature 32) ───────────────────────────────── */
+
+.quick-glance {
+  margin: 0 var(--space-lg) var(--space-lg);
+  padding: var(--space-md) var(--space-lg);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+.quick-glance-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-sm);
+}
+
+.quick-glance-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.quick-glance-cache-age {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--subtle);
+}
+
+.quick-glance-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+}
+
+.quick-glance-item:first-of-type {
+  border-top: none;
+}
+
+.quick-glance-route {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.quick-glance-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.quick-glance-direction {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.quick-glance-time {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+}
+
+.quick-glance-countdown {
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.quick-glance-platform {
+  font-size: 10px;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.quick-glance-no-data {
+  font-size: 14px;
+  color: var(--muted);
 }

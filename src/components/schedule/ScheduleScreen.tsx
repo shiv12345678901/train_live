@@ -4,6 +4,8 @@ import { AlertList } from './AlertList';
 import { AlertForm } from './AlertForm';
 import { AlertSummary } from './AlertSummary';
 import { useAppStore } from '@/store/appStore';
+import { toast } from '@/components/shared/Toast';
+import { hapticSuccess } from '@/lib/haptics';
 import type { AlertFormData } from './AlertForm';
 
 export function ScheduleScreen() {
@@ -30,7 +32,36 @@ export function ScheduleScreen() {
     loadRouteCards();
   }, [loadAlertSchedules, loadRouteCards]);
 
+  // Feature 30: Schedule conflict detection
+  function detectConflict(formData: AlertFormData): string | null {
+    const existing = alertSchedules.find((schedule) => {
+      if (!schedule.enabled) return false;
+      if (schedule.routeCardId !== formData.routeCardId) return false;
+      if (schedule.departureTime !== formData.departureTime) return false;
+      // Check day overlap
+      if (formData.days.length > 0 && schedule.days.length > 0) {
+        const overlap = formData.days.some((d) => schedule.days.includes(d));
+        if (overlap) return true;
+      }
+      // One-time date overlap
+      if (formData.oneTimeDate && schedule.oneTimeDate === formData.oneTimeDate) return true;
+      return false;
+    });
+    if (existing) {
+      return `An alert for "${existing.title}" already exists at ${existing.departureTime} on overlapping days.`;
+    }
+    return null;
+  }
+
   const handleSave = async (formData: AlertFormData) => {
+    // Feature 30: conflict check
+    const conflict = detectConflict(formData);
+    if (conflict) {
+      toast(conflict, 'info', 5000);
+      // Still allow save — just warn
+    }
+
+    // Feature 35: batch creation — if recurring with days, create one schedule covering all days
     await saveAlertSchedule({
       routeCardId: formData.routeCardId || pendingAlertPrefill?.routeCardId || '',
       title: formData.title,
@@ -43,6 +74,15 @@ export function ScheduleScreen() {
       selectedTripId: formData.tripId,
       selectedPlatform: formData.platform,
     });
+
+    hapticSuccess();
+    const dayCount = formData.days.length;
+    toast(
+      dayCount > 1
+        ? `Alert set for ${dayCount} days at ${formData.departureTime}`
+        : 'Alert created',
+      'success'
+    );
     setShowForm(false);
     setPendingAlertPrefill(null);
   };

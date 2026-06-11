@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { RouteCardGrid } from './RouteCardGrid';
 import { RouteCreationSheet } from './RouteCreationSheet';
+import { TripPlanner } from './TripPlanner';
 import { useAppStore } from '@/store/appStore';
 import { toast } from '@/components/shared/Toast';
 import { hapticLight, hapticSuccess } from '@/lib/haptics';
@@ -31,6 +32,7 @@ export function HomeScreen() {
   } = useAppStore();
   const [showCreation, setShowCreation] = useState(false);
   const [editingCard, setEditingCard] = useState<RouteCardType | null>(null);
+  const [showTripPlanner, setShowTripPlanner] = useState(false);
   const [initialLoading, setInitialLoading] = useState(routeCards.length === 0);
   const refreshTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -174,7 +176,19 @@ export function HomeScreen() {
           {getGreeting()} <span className="home-header-wave" aria-hidden="true">👋</span>
         </h1>
         <p className="home-header-subtitle">Your routes</p>
+        <button className="home-trip-planner-btn" onClick={() => setShowTripPlanner(true)} type="button">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="11" cy="11" r="8" />
+            <path d="M21 21l-4.35-4.35" />
+          </svg>
+          Plan a trip
+        </button>
       </header>
+
+      {/* Trip Planner Overlay (feature 26) */}
+      {showTripPlanner && (
+        <TripPlanner onClose={() => setShowTripPlanner(false)} />
+      )}
 
       {/* Skeleton loading state (feature 14) */}
       {initialLoading ? (

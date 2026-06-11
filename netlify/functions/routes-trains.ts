@@ -1,6 +1,7 @@
 import type { Handler } from '@netlify/functions';
 import { fetchWithTimeout } from '../../lib/http';
 import { detectTransportType, getTimingStatus, matchesDestination, type TransportType } from '../../lib/trainParsing';
+import { isRateLimited, getRateLimitHeaders } from '../../lib/rateLimit';
 
 type OccupancyLevel = 'empty' | 'low' | 'medium' | 'high' | 'full' | 'unknown';
 
@@ -201,6 +202,18 @@ function parseServiceAlerts(infos: Array<Record<string, unknown>>): ServiceAlert
 const handler: Handler = async (event) => {
   if (event.httpMethod !== 'GET') {
     return { statusCode: 405, body: JSON.stringify({ error: 'Method not allowed' }) };
+  }
+
+  // Rate limiting (feature 38)
+  const clientIp = event.headers['x-forwarded-for'] || event.headers['client-ip'] || 'unknown';
+  const userId = event.headers['x-user-id'] || 'anonymous';
+  const rateLimitKey = `${userId}:${clientIp}`;
+  if (isRateLimited(rateLimitKey)) {
+    return {
+      statusCode: 429,
+      headers: { ...getRateLimitHeaders(rateLimitKey), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ error: 'Too many requests. Please wait a moment.' }),
+    };
   }
 
   const routeId = event.queryStringParameters?.id;

@@ -11,6 +11,8 @@ const KEYS = {
   settings: 'trainlive:settings',
   pendingOps: 'trainlive:pendingOps',
   lastSync: 'trainlive:lastSync',
+  liveTrainsCache: 'trainlive:liveTrainsCache',
+  liveTrainsCacheTime: 'trainlive:liveTrainsCacheTime',
 } as const;
 
 // ─── Generic read/write ─────────────────────────────────────────────
@@ -121,4 +123,28 @@ export function getLastSyncTime(): string | null {
 
 export function setLastSyncTime(): void {
   localStorage.setItem(KEYS.lastSync, new Date().toISOString());
+}
+
+// ─── Live Trains Cache (Feature 33: Offline mode) ───────────────────
+
+import type { TrainDeparture } from '@/types';
+
+export function getCachedLiveTrains(): Record<string, TrainDeparture[]> {
+  return read<Record<string, TrainDeparture[]>>(KEYS.liveTrainsCache, {});
+}
+
+export function setCachedLiveTrains(data: Record<string, TrainDeparture[]>): void {
+  write(KEYS.liveTrainsCache, data);
+  localStorage.setItem(KEYS.liveTrainsCacheTime, new Date().toISOString());
+}
+
+export function getLiveTrainsCacheAge(): string {
+  const timeStr = localStorage.getItem(KEYS.liveTrainsCacheTime);
+  if (!timeStr) return '';
+  const cacheTime = new Date(timeStr).getTime();
+  const ageMinutes = Math.round((Date.now() - cacheTime) / 60000);
+  if (ageMinutes < 1) return 'Just now';
+  if (ageMinutes === 1) return '1 min ago';
+  if (ageMinutes < 60) return `${ageMinutes} min ago`;
+  return `${Math.round(ageMinutes / 60)}h ago`;
 }

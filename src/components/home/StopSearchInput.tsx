@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { searchPresetStops, type PresetStop } from '@/data/stops';
+import { getSearchHistory, addToSearchHistory, type SearchHistoryItem } from '@/store/searchHistory';
 
 interface StopResult {
   id: string;
@@ -88,14 +89,26 @@ export function StopSearchInput({ id, label, value, onChange, placeholder }: Sto
     setIsOpen(false);
     setPresetResults([]);
     setApiResults([]);
+    addToSearchHistory(name, stopId);
   };
 
   const handleFocus = () => {
     // Show results based on current query
     if (!query.trim()) {
-      // Show popular stops on focus if empty
-      const popular = searchPresetStops('Station').slice(0, 8);
-      setPresetResults(popular);
+      // Show recent search history first, then popular stops
+      const history = getSearchHistory();
+      if (history.length > 0) {
+        const historyAsPreset: PresetStop[] = history.map((h: SearchHistoryItem) => ({
+          name: h.name,
+          stopId: h.stopId,
+          type: 'station' as const,
+          zone: 'Recent',
+        }));
+        setPresetResults(historyAsPreset);
+      } else {
+        const popular = searchPresetStops('Station').slice(0, 8);
+        setPresetResults(popular);
+      }
       setIsOpen(true);
     } else {
       // Re-run local search for the current value so dropdown can open

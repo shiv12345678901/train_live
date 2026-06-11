@@ -10,6 +10,25 @@
   node_bundler = "esbuild"
   external_node_modules = ["firebase-admin"]
 
+# Cache headers for API responses (Feature 37)
+[[headers]]
+  for = "/.netlify/functions/routes-trains"
+  [headers.values]
+    Cache-Control = "public, max-age=30, s-maxage=30"
+
+[[headers]]
+  for = "/.netlify/functions/routes-list"
+  [headers.values]
+    Cache-Control = "private, max-age=10"
+
+[[headers]]
+  for = "/.netlify/functions/stops-search"
+  [headers.values]
+    Cache-Control = "public, max-age=300, s-maxage=600"
+
+# Compression is enabled by default on Netlify (Feature 41)
+# Static assets get brotli/gzip automatically
+
 [[redirects]]
   from = "/*"
   to = "/index.html"

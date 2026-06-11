@@ -10,6 +10,7 @@ import {
   getLocalSettings, setLocalSettings,
   addPendingOp, getPendingOps, removePendingOp, updatePendingOp,
   setLastSyncTime,
+  getCachedLiveTrains, setCachedLiveTrains,
 } from './localStorage';
 
 interface AppState {
@@ -230,7 +231,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   // ─── Live Trains ──────────────────────────────────────────────────
 
-  liveTrains: {},
+  liveTrains: getCachedLiveTrains(),
   liveTrainsLoading: {},
   liveTrainsError: {},
 
@@ -250,10 +251,14 @@ export const useAppStore = create<AppState>()((set, get) => ({
       const destinationStopId = card?.destinationStopId;
 
       const trains = await apiFetchLiveTrains(routeId, origin, destination, originStopId, destinationStopId, limit, card?.mode ?? 'train');
-      set((state) => ({
-        liveTrains: { ...state.liveTrains, [routeId]: trains },
-        liveTrainsLoading: { ...state.liveTrainsLoading, [routeId]: false },
-      }));
+      set((state) => {
+        const updatedLiveTrains = { ...state.liveTrains, [routeId]: trains };
+        setCachedLiveTrains(updatedLiveTrains);
+        return {
+          liveTrains: updatedLiveTrains,
+          liveTrainsLoading: { ...state.liveTrainsLoading, [routeId]: false },
+        };
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to fetch live trains';
       set((state) => ({
