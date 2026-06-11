@@ -21,6 +21,7 @@ export function RouteDetailsPage() {
   const setPendingAlertPrefill = useAppStore((s) => s.setPendingAlertPrefill);
 
   const card = routeCards.find((c) => c.id === id);
+  const cardId = card?.id;
   const trains = id ? liveTrains[id] ?? [] : [];
   const isLoading = id ? liveTrainsLoading[id] ?? false : false;
   const error = id ? liveTrainsError[id] ?? null : null;
@@ -30,7 +31,6 @@ export function RouteDetailsPage() {
   const [routesLoaded, setRoutesLoaded] = useState(routeCards.length > 0);
   const { routeFilter, serviceLimit } = filterState;
   const savedMode = card?.mode ?? 'train';
-  const cardId = card?.id;
 
   const uniqueTrains = trains.filter((train, index, list) => {
     const key = `${train.tripId}:${train.scheduledTime}:${train.platform}:${getDepartureMode(train)}`;
@@ -63,10 +63,10 @@ export function RouteDetailsPage() {
   }, [loadRouteCards]);
 
   useEffect(() => {
-    if (id && card) {
+    if (id && cardId) {
       void fetchLiveTrains(id, serviceLimit).finally(() => setLastUpdated(new Date()));
     }
-  }, [id, card, fetchLiveTrains, serviceLimit]);
+  }, [id, cardId, fetchLiveTrains, serviceLimit]);
 
   useEffect(() => {
     if (!id || !cardId) return;
@@ -114,7 +114,7 @@ export function RouteDetailsPage() {
   };
 
   const handleLoadMore = () => {
-    setFilterState((prev) => ({ ...prev, serviceLimit: prev.serviceLimit + 5 }));
+    setFilterState((prev) => ({ ...prev, serviceLimit: Math.min(prev.serviceLimit + 10, 50) }));
   };
 
   const updatedLabel = lastUpdated
@@ -185,13 +185,13 @@ export function RouteDetailsPage() {
             onTap={() => setSelectedTrain(train)}
           />
         ))}
-        {!isLoading && !error && hasMore && (
+        {!isLoading && !error && hasMore && serviceLimit < 50 && (
           <button
             className="btn-secondary load-more-btn"
             onClick={handleLoadMore}
             type="button"
           >
-            Show more
+            Show more departures ({displayTrains.length} of {uniqueTrains.length}+)
           </button>
         )}
       </div>

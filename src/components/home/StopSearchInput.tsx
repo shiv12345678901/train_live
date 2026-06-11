@@ -91,13 +91,22 @@ export function StopSearchInput({ id, label, value, onChange, placeholder }: Sto
   };
 
   const handleFocus = () => {
-    // Show popular stops on focus if empty
+    // Show results based on current query
     if (!query.trim()) {
+      // Show popular stops on focus if empty
       const popular = searchPresetStops('Station').slice(0, 8);
       setPresetResults(popular);
       setIsOpen(true);
-    } else if (presetResults.length > 0 || apiResults.length > 0) {
-      setIsOpen(true);
+    } else {
+      // Re-run local search for the current value so dropdown can open
+      const localResults = searchPresetStops(query);
+      setPresetResults(localResults);
+      if (localResults.length > 0 || apiResults.length > 0) {
+        setIsOpen(true);
+      } else if (query.trim().length >= 3) {
+        setIsOpen(true);
+        searchApi(query);
+      }
     }
   };
 

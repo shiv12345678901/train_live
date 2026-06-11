@@ -23,7 +23,22 @@ export async function requestJson<T>(path: string, init: RequestInit = {}): Prom
 }
 
 export async function requestVoid(path: string, init: RequestInit = {}): Promise<void> {
-  await requestJson<unknown>(path, init);
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      ...init,
+      headers: {
+        'x-user-id': DEFAULT_USER_ID,
+        ...init.headers,
+      },
+    });
+  } catch (error) {
+    throw new Error('Network error - check your connection', { cause: error });
+  }
+
+  if (!res.ok) {
+    throw new Error(await responseMessage(res));
+  }
 }
 
 async function responseMessage(res: Response): Promise<string> {

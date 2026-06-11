@@ -1,5 +1,6 @@
-import type { TrainDeparture } from '@/types';
+import type { TrainDeparture, OccupancyLevel } from '@/types';
 import { getDepartureMode } from './transportMode';
+import { useCountdown, formatCountdown } from '@/hooks/useCountdown';
 
 interface TrainCardProps {
   train: TrainDeparture;
@@ -18,8 +19,111 @@ function formatTime(isoTime: string): string {
   return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
 }
 
-function getMinutesUntil(isoTime: string): number {
-  return Math.round((new Date(isoTime).getTime() - Date.now()) / 60000);
+// ─── Occupancy Icon Component ────────────────────────────────────────
+
+function OccupancyIndicator({ level }: { level: OccupancyLevel }) {
+  if (level === 'unknown') return null;
+
+  const config: Record<OccupancyLevel, { label: string; filled: number; color: string }> = {
+    empty: { label: 'Many seats', filled: 0, color: 'var(--success)' },
+    low: { label: 'Seats available', filled: 1, color: 'var(--success)' },
+    medium: { label: 'Few seats', filled: 2, color: 'var(--warning)' },
+    high: { label: 'Standing room', filled: 3, color: '#c2410c' },
+    full: { label: 'At capacity', filled: 4, color: 'var(--danger)' },
+    unknown: { label: '', filled: 0, color: '' },
+  };
+
+  const { label, filled, color } = config[level];
+
+  return (
+    <div className="train-card-occupancy" title={label}>
+      <div className="train-card-occupancy-seats">
+        {[0, 1, 2, 3].map((i) => (
+          <svg key={i} width="10" height="12" viewBox="0 0 10 12" fill="none">
+            <path
+              d="M2 1h6a1 1 0 011 1v6a2 2 0 01-2 2H3a2 2 0 01-2-2V2a1 1 0 011-1z"
+              fill={i < filled ? color : 'var(--border)'}
+              stroke={i < filled ? color : 'var(--border)'}
+              strokeWidth="0.5"
+            />
+            <path d="M2 10v1.5M8 10v1.5" stroke={i < filled ? color : 'var(--border)'} strokeWidth="1" strokeLinecap="round" />
+          </svg>
+        ))}
+      </div>
+      <span className="train-card-occupancy-label" style={{ color }}>{label}</span>
+    </div>
+  );
+}
+
+// ─── Fare Display ────────────────────────────────────────────────────
+
+function FareDisplay({ fare }: { fare: TrainDeparture['fareEstimate'] }) {
+  if (!fare) return null;
+  const displayFare = fare.isPeakNow ? fare.adultPeak : fare.adultOffPeak;
+  return (
+    <span className="train-card-fare">
+      ${displayFare.toFixed(2)} {fare.isPeakNow ? '' : '(off-peak)'}
+    </span>
+  );
+}
+
+// ─── Multi-leg Journey Display ───────────────────────────────────────
+
+function MultiLegSummary({ legs }: { legs: TrainDeparture['legs'] }) {
+  if (!legs || legs.length <= 1) return null;
+  const transitLegs = legs.filter(l => !l.isWalking);
+  const totalDuration = legs.reduce((sum, l) => sum + l.durationMinutes, 0);
+
+  return (
+    <div className="train-card-multileg">
+      <div className="train-card-multileg-icons">
+        {transitLegs.map((leg, i) => (
+          <span key={i} className="train-card-multileg-step">
+            <TransportIcon mode={leg.mode} />
+            <span className="train-card-multileg-route">{leg.route}</span>
+            {i < transitLegs.length - 1 && <span className="train-card-multileg-arrow">›</span>}
+          </span>
+        ))}
+      </div>
+      <span className="train-card-multileg-duration">{totalDuration} min total</span>
+    </div>
+  );
+}
+
+// ─── Service Alerts Chip ─────────────────────────────────────────────
+
+function AlertChips({ alerts }: { alerts: TrainDeparture['alerts'] }) {
+  if (!alerts || alerts.length === 0) return null;
+  const hasCritical = alerts.some(a => a.severity === 'critical');
+  const hasWarning = alerts.some(a => a.severity === 'warning');
+  
+  return (
+    <div className="train-card-alerts">
+      <span className={`train-card-alert-chip ${hasCritical ? 'critical' : hasWarning ? 'warning' : 'info'}`}>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+          <path d="M12 9v4M12 17h.01" />
+          <path d="M10.29 3.86l-8.6 14.86A2 2 0 003.4 22h17.2a2 2 0 001.71-3.28l-8.6-14.86a2 2 0 00-3.42 0z" />
+        </svg>
+        {alerts.length} alert{alerts.length > 1 ? 's' : ''}
+      </span>
+    </div>
+  );
+}
+
+// ─── Live Countdown ──────────────────────────────────────────────────
+
+function LiveCountdown({ isoTime }: { isoTime: string }) {
+  const minutes = useCountdown(isoTime);
+  const label = formatCountdown(minutes);
+  if (!label || minutes === null || minutes > 90) return null;
+  
+  const urgency = minutes <= 1 ? 'urgent' : minutes <= 3 ? 'soon' : 'normal';
+  
+  return (
+    <span className={`train-card-live-countdown train-card-live-countdown--${urgency}`}>
+      {label}
+    </span>
+  );
 }
 
 function TransportIcon({ mode }: { mode: string }) {
@@ -81,9 +185,9 @@ export function TrainCard({ train, onBellTap, onTap }: TrainCardProps) {
   const displayTime = train.estimatedTime || train.scheduledTime;
   const timeStr = displayTime ? formatTime(displayTime) : null;
   const scheduledStr = formatTime(train.scheduledTime);
-  const minutesAway = displayTime ? getMinutesUntil(displayTime) : null;
   const platform = formatPlatform(train.platform);
   const mode = getDepartureMode(train);
+  const hasMultiLeg = train.legs && train.legs.length > 1;
 
   const statusConfig = {
     'on-time': { label: 'On time', class: 'status-ontime', dot: '#0b7a3b' },
@@ -122,9 +226,7 @@ export function TrainCard({ train, onBellTap, onTap }: TrainCardProps) {
             {timeStr ? (
               <>
                 <span className="train-card-time">{timeStr}</span>
-                {minutesAway !== null && minutesAway > 0 && minutesAway < 90 && (
-                  <span className="train-card-countdown">in {minutesAway} min</span>
-                )}
+                {displayTime && <LiveCountdown isoTime={displayTime} />}
                 {train.estimatedTime && train.estimatedTime !== train.scheduledTime && (
                   <span className="train-card-scheduled">Sched {scheduledStr}</span>
                 )}
@@ -143,6 +245,19 @@ export function TrainCard({ train, onBellTap, onTap }: TrainCardProps) {
           )}
         </div>
       </div>
+
+      {/* Bottom row: occupancy, fare, alerts, multi-leg */}
+      <div className="train-card-bottom-row">
+        {train.occupancy && train.occupancy !== 'unknown' && (
+          <OccupancyIndicator level={train.occupancy} />
+        )}
+        {train.fareEstimate && (
+          <FareDisplay fare={train.fareEstimate} />
+        )}
+        <AlertChips alerts={train.alerts} />
+      </div>
+      
+      {hasMultiLeg && <MultiLegSummary legs={train.legs} />}
     </div>
   );
 }

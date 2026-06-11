@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { RouteCardGrid } from './RouteCardGrid';
 import { RouteCreationSheet } from './RouteCreationSheet';
@@ -28,18 +28,38 @@ export function HomeScreen() {
   } = useAppStore();
   const [showCreation, setShowCreation] = useState(false);
   const [editingCard, setEditingCard] = useState<RouteCardType | null>(null);
+  const refreshTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     loadRouteCards();
   }, [loadRouteCards]);
 
+  // Initial fetch for ALL cards (not just first 4)
   useEffect(() => {
-    for (const card of routeCards.slice(0, 4)) {
+    for (const card of routeCards) {
       if (!liveTrains[card.id] && !liveTrainsLoading[card.id]) {
         void fetchLiveTrains(card.id);
       }
     }
   }, [fetchLiveTrains, liveTrains, liveTrainsLoading, routeCards]);
+
+  // Auto-refresh all cards every 30 seconds
+  useEffect(() => {
+    const refreshAll = () => {
+      if (document.visibilityState !== 'visible') return;
+      for (const card of routeCards) {
+        void fetchLiveTrains(card.id);
+      }
+    };
+
+    refreshTimerRef.current = setInterval(refreshAll, 30000);
+    document.addEventListener('visibilitychange', refreshAll);
+
+    return () => {
+      if (refreshTimerRef.current) clearInterval(refreshTimerRef.current);
+      document.removeEventListener('visibilitychange', refreshAll);
+    };
+  }, [fetchLiveTrains, routeCards]);
 
   const handleSave = async (data: { title: string; origin: string; destination: string; mode: TransportMode; routeFilter: string[]; originStopId?: string; destinationStopId?: string }) => {
     if (editingCard) {

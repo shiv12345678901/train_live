@@ -33,6 +33,25 @@ export type AlertSchedule = {
   updatedAt: string;
 };
 
+// Occupancy level for a service
+export type OccupancyLevel = 'empty' | 'low' | 'medium' | 'high' | 'full' | 'unknown';
+
+// Leg of a journey (for multi-leg trips)
+export type JourneyLeg = {
+  mode: TransportMode;
+  route: string;
+  origin: string;
+  destination: string;
+  platform?: string;
+  scheduledDeparture: string;
+  estimatedDeparture?: string;
+  scheduledArrival: string;
+  estimatedArrival?: string;
+  durationMinutes: number;
+  stops: number;
+  isWalking?: boolean;
+};
+
 // Train Departure (API response)
 export type TrainDeparture = {
   tripId: string;
@@ -45,7 +64,18 @@ export type TrainDeparture = {
   delayMinutes?: number;
   cancelled: boolean;
   transportType?: 'train' | 'metro' | 'bus' | 'light_rail' | 'ferry';
+  occupancy?: OccupancyLevel;
   alerts: ServiceAlert[];
+  legs?: JourneyLeg[]; // For multi-leg journeys
+  fareEstimate?: FareEstimate;
+};
+
+// Fare estimate for a trip
+export type FareEstimate = {
+  adultPeak: number; // in dollars
+  adultOffPeak: number;
+  isPeakNow: boolean;
+  currency: string;
 };
 
 // Service Alert
@@ -53,6 +83,8 @@ export type ServiceAlert = {
   id: string;
   title: string;
   description: string;
+  severity?: 'info' | 'warning' | 'critical';
+  affectedLines?: string[];
 };
 
 // Alert Delivery State (persisted per schedule)

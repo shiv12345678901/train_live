@@ -225,7 +225,7 @@ body {
   flex-direction: column;
   justify-content: center;
   gap: clamp(8px, calc(var(--route-card-height) * 0.1), 12px);
-  padding: clamp(12px, calc(var(--route-card-height) * 0.16), 18px) 40px clamp(10px, calc(var(--route-card-height) * 0.13), 14px) clamp(12px, 3.8vw, 18px);
+  padding: clamp(12px, calc(var(--route-card-height) * 0.16), 18px) clamp(14px, 4vw, 20px) clamp(10px, calc(var(--route-card-height) * 0.13), 14px) clamp(12px, 3.8vw, 18px);
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 14px;
@@ -418,10 +418,8 @@ body {
   flex-direction: column;
   align-items: flex-end;
   gap: clamp(3px, calc(var(--route-card-height) * 0.05), 6px);
-  width: clamp(78px, 24vw, 112px);
-  min-width: clamp(72px, 21vw, 96px);
+  min-width: fit-content;
   max-width: 34%;
-  margin-right: 6px;
   text-align: right;
   flex-shrink: 0;
 }
@@ -494,24 +492,20 @@ body {
   min-height: clamp(22px, calc(var(--route-card-height) * 0.24), 30px);
   width: 100%;
   min-width: 0;
-  padding-left: clamp(46px, calc(var(--route-card-height) * 0.56), 68px);
+  padding-left: clamp(44px, calc(clamp(34px, calc(var(--route-card-height) * 0.4), 48px) + clamp(10px, 3.4vw, 18px)), 66px);
 }
 
 .route-card-chevron {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 32px;
+  width: 20px;
   color: var(--muted);
-  font-size: clamp(28px, calc(var(--route-card-height) * 0.32), 38px);
-  font-weight: 500;
+  font-size: clamp(22px, calc(var(--route-card-height) * 0.26), 30px);
+  font-weight: 400;
   line-height: 1;
   flex-shrink: 0;
-  position: absolute;
-  top: 50%;
-  right: 12px;
-  transform: translateY(-50%);
+  margin-left: 2px;
 }
 
 .route-card-route-row {
@@ -1098,11 +1092,186 @@ body {
 /* Legacy — hide old elements */
 .train-card-bell,
 .train-card-platform,
-.train-card-bottom,
 .train-card-route,
 .train-card-platform-badge,
 .train-card-status {
   display: none;
+}
+
+/* ─── Train Card Bottom Row (occupancy, fare, alerts) ───────────────── */
+
+.train-card-bottom-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px 0;
+  flex-wrap: wrap;
+}
+
+.train-card-occupancy {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.train-card-occupancy-seats {
+  display: flex;
+  gap: 2px;
+}
+
+.train-card-occupancy-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.train-card-fare {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  background: var(--panel);
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+}
+
+.train-card-alerts {
+  display: flex;
+  gap: 4px;
+}
+
+.train-card-alert-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  background: #fef3c7;
+  color: var(--warning);
+}
+
+.train-card-alert-chip.critical {
+  background: #fee2e2;
+  color: var(--danger);
+}
+
+.train-card-alert-chip.info {
+  background: #e0f2fe;
+  color: #0369a1;
+}
+
+/* ─── Multi-Leg Journey Display ─────────────────────────────────────── */
+
+.train-card-multileg {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 16px 4px;
+  border-top: 1px solid var(--border);
+  margin-top: 8px;
+}
+
+.train-card-multileg-icons {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.train-card-multileg-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.train-card-multileg-step svg {
+  width: 14px;
+  height: 14px;
+}
+
+.train-card-multileg-route {
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.train-card-multileg-arrow {
+  color: var(--muted);
+  font-size: 14px;
+  margin: 0 2px;
+}
+
+.train-card-multileg-duration {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* ─── Live Countdown in Train Card ──────────────────────────────────── */
+
+.train-card-live-countdown {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--success);
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+  background: #f0fbf4;
+}
+
+.train-card-live-countdown--soon {
+  color: var(--warning);
+  background: #fef9ee;
+}
+
+.train-card-live-countdown--urgent {
+  color: var(--danger);
+  background: #fef2f2;
+  animation: countdown-pulse 1s ease-in-out infinite;
+}
+
+@keyframes countdown-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+/* ─── Countdown Pill (Home Route Cards) ─────────────────────────────── */
+
+.countdown-pill {
+  font-size: 12px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  background: #f0fbf4;
+  color: var(--success);
+  white-space: nowrap;
+}
+
+.countdown-pill--soon {
+  background: #fef9ee;
+  color: var(--warning);
+}
+
+.countdown-pill--urgent {
+  background: #fef2f2;
+  color: var(--danger);
+  animation: countdown-pulse 1s ease-in-out infinite;
+}
+
+/* ─── Route Card Alert Chip ─────────────────────────────────────────── */
+
+.route-card-alert-chip {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  background: #fef3c7;
+  color: var(--warning);
+  white-space: nowrap;
 }
 
 /* ─── Mode Filter Chips ─────────────────────────────────────────────── */

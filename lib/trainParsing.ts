@@ -49,9 +49,20 @@ export function matchesDestination(serviceDestination: string, targetDestination
   const target = normalizeStopName(targetDestination);
   if (!service || !target) return false;
 
-  const cityStations = ['central', 'town hall', 'wynyard', 'circular quay', 'martin place', 'st james', 'museum', 'redfern', 'bondi junction', 'kings cross', 'edgecliff'];
-  const cityMatch = cityStations.some((station) => target.includes(station)) &&
-    cityStations.some((station) => service.includes(station));
+  // Direct substring match
+  if (service.includes(target) || target.includes(service)) return true;
 
-  return service.includes(target) || target.includes(service) || (service.includes('via') && service.includes(target)) || cityMatch;
+  // "via" match — service destination includes target in a "via" clause
+  if (service.includes('via') && service.includes(target)) return true;
+
+  // City loop match — if target is a city station, services going TO any city loop station will pass through it
+  const cityStations = ['central', 'town hall', 'wynyard', 'circular quay', 'martin place', 'st james', 'museum'];
+  const isTargetCity = cityStations.some((station) => target.includes(station));
+  const isServiceCity = cityStations.some((station) => service.includes(station));
+
+  // Only match if the target itself is a city station AND the service is also going to a city station
+  // (trains running through the city loop will stop at all city stations)
+  if (isTargetCity && isServiceCity) return true;
+
+  return false;
 }

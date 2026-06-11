@@ -2,6 +2,38 @@ import type { Handler } from '@netlify/functions';
 import { fetchWithTimeout } from '../../lib/http';
 import { detectTransportType, getTimingStatus, matchesDestination, type TransportType } from '../../lib/trainParsing';
 
+type OccupancyLevel = 'empty' | 'low' | 'medium' | 'high' | 'full' | 'unknown';
+
+interface JourneyLeg {
+  mode: string;
+  route: string;
+  origin: string;
+  destination: string;
+  platform?: string;
+  scheduledDeparture: string;
+  estimatedDeparture?: string;
+  scheduledArrival: string;
+  estimatedArrival?: string;
+  durationMinutes: number;
+  stops: number;
+  isWalking?: boolean;
+}
+
+interface FareEstimate {
+  adultPeak: number;
+  adultOffPeak: number;
+  isPeakNow: boolean;
+  currency: string;
+}
+
+interface ServiceAlert {
+  id: string;
+  title: string;
+  description: string;
+  severity?: 'info' | 'warning' | 'critical';
+  affectedLines?: string[];
+}
+
 interface TrainDeparture {
   tripId: string;
   route: string;
@@ -13,7 +45,10 @@ interface TrainDeparture {
   delayMinutes?: number;
   cancelled: boolean;
   transportType: 'train' | 'metro' | 'bus' | 'light_rail' | 'ferry';
-  alerts: { id: string; title: string; description: string }[];
+  occupancy?: OccupancyLevel;
+  alerts: ServiceAlert[];
+  legs?: JourneyLeg[];
+  fareEstimate?: FareEstimate;
 }
 
 type RouteMode = TransportType | 'all';
@@ -76,6 +111,93 @@ function stopEventServesDestination(
   return serviceMatchesDestination(transportDest, targetDestination, targetStopId);
 }
 
+// ─── Occupancy Parsing ──────────────────────────────────────────────
+
+function parseOccupancy(stopEvent: Record<string, unknown>): OccupancyLevel {
+  // TfNSW returns occupancy info in properties or as a direct field
+  const properties = (stopEvent.properties || {}) as Record<string, unknown>;
+  const occupancy = (properties.occupancy || stopEvent.occupancy || '') as string;
+  const occ = occupancy.toLowerCase();
+  if (occ.includes('empty') || occ === 'manyseatsavailable' || occ === '1') return 'empty';
+  if (occ.includes('low') || occ === 'seatsavailable' || occ === '2') return 'low';
+  if (occ.includes('medium') || occ === 'fewseatsavailable' || occ === '3') return 'medium';
+  if (occ.includes('high') || occ === 'standingonly' || occ === '4') return 'high';
+  if (occ.includes('full') || occ === 'crushedstanding' || occ === '5') return 'full';
+  return 'unknown';
+}
+
+// ─── Fare Estimation (Sydney Opal fare bands) ───────────────────────
+
+function estimateFare(originStopId: string, destinationStopId: string, departureTime: string): FareEstimate {
+  // Sydney Opal fares are distance-based. Without exact tap data, 
+  // estimate using band system (0-10km, 10-20km, 20-35km, 35-65km, 65+km)
+  // These are 2024/2025 adult Opal card rates
+  const peakRates = [3.61, 4.44, 5.15, 6.49, 8.21];
+  const offPeakRates = [2.53, 3.11, 3.61, 4.54, 5.75];
+
+  // Rough distance estimation based on stop IDs (first digits indicate area)
+  let bandIndex = 0;
+  if (originStopId && destinationStopId) {
+    const originPrefix = parseInt(originStopId.slice(0, 3), 10);
+    const destPrefix = parseInt(destinationStopId.slice(0, 3), 10);
+    const prefixDiff = Math.abs(originPrefix - destPrefix);
+    if (prefixDiff < 5) bandIndex = 0;
+    else if (prefixDiff < 15) bandIndex = 1;
+    else if (prefixDiff < 30) bandIndex = 2;
+    else if (prefixDiff < 50) bandIndex = 3;
+    else bandIndex = 4;
+  } else {
+    bandIndex = 1; // default to band 2 if we can't estimate
+  }
+
+  // Determine peak/off-peak
+  const isPeakNow = isPeakTime(departureTime);
+
+  return {
+    adultPeak: peakRates[bandIndex],
+    adultOffPeak: offPeakRates[bandIndex],
+    isPeakNow,
+    currency: 'AUD',
+  };
+}
+
+function isPeakTime(isoTime: string): boolean {
+  if (!isoTime) return true;
+  const date = new Date(isoTime);
+  const day = date.getDay();
+  // Weekends are always off-peak
+  if (day === 0 || day === 6) return false;
+  const hour = date.getHours();
+  const minute = date.getMinutes();
+  const timeMinutes = hour * 60 + minute;
+  // Peak: 6:30-10:00 and 15:00-19:00 on weekdays
+  return (timeMinutes >= 390 && timeMinutes < 600) || (timeMinutes >= 900 && timeMinutes < 1140);
+}
+
+// ─── Service Alerts Parsing ──────────────────────────────────────────
+
+function parseServiceAlerts(infos: Array<Record<string, unknown>>): ServiceAlert[] {
+  const alerts: ServiceAlert[] = [];
+  for (const info of infos.slice(0, 5)) {
+    const title = String(info.title || info.subtitle || '').trim();
+    const desc = String(info.content || info.description || '').trim();
+    if (!title && !desc) continue;
+    
+    const priorityStr = String(info.priority || '').toLowerCase();
+    let severity: 'info' | 'warning' | 'critical' = 'info';
+    if (priorityStr === 'high' || priorityStr === 'vhigh') severity = 'critical';
+    else if (priorityStr === 'normal' || priorityStr === 'medium') severity = 'warning';
+
+    alerts.push({
+      id: String(info.id || `alert-${alerts.length}`),
+      title: title || desc.slice(0, 80),
+      description: desc,
+      severity,
+    });
+  }
+  return alerts;
+}
+
 const handler: Handler = async (event) => {
   if (event.httpMethod !== 'GET') {
     return { statusCode: 405, body: JSON.stringify({ error: 'Method not allowed' }) };
@@ -95,7 +217,7 @@ const handler: Handler = async (event) => {
     const selectedMode = parseMode(event.queryStringParameters?.mode);
     const requestedLimit = Number(event.queryStringParameters?.limit || 5);
     const resultLimit = Number.isFinite(requestedLimit)
-      ? Math.min(Math.max(Math.round(requestedLimit), 5), 50)
+      ? Math.min(Math.max(Math.round(requestedLimit), 1), 50)
       : 5;
 
     if (!origin || !destination) {
@@ -176,6 +298,16 @@ const handler: Handler = async (event) => {
 
           const { status, delayMinutes } = getTimingStatus(scheduledTime, estimatedTime, isCancelled);
 
+          // Parse occupancy from stop event
+          const occupancy = parseOccupancy(stopEvent);
+
+          // Parse service alerts from stop event infos
+          const infos = (stopEvent.infos || []) as Array<Record<string, unknown>>;
+          const alerts = parseServiceAlerts(infos);
+
+          // Estimate fare
+          const fareEstimate = estimateFare(originStopId, destinationStopId, scheduledTime);
+
           departures.push({
             tripId: tripId || `trip-${departures.length}`,
             route: line,
@@ -187,7 +319,9 @@ const handler: Handler = async (event) => {
             delayMinutes,
             cancelled: isCancelled,
             transportType,
-            alerts: [],
+            occupancy,
+            alerts,
+            fareEstimate,
           });
         }
 
@@ -228,14 +362,17 @@ const handler: Handler = async (event) => {
         const candidateProduct = (candidateTransportation.product || {}) as Record<string, unknown>;
         return Number(candidateProduct.class) !== 100;
       });
-      if (transitLegs.length !== 1) continue; // Direct service, allowing walk/access legs.
+      
+      // Support both single-leg and multi-leg journeys
+      if (transitLegs.length === 0) continue;
 
-      const leg = transitLegs[0];
-      const transportation = (leg.transportation || {}) as Record<string, unknown>;
+      const isMultiLeg = transitLegs.length > 1;
+      const firstLeg = transitLegs[0];
+      const transportation = (firstLeg.transportation || {}) as Record<string, unknown>;
       const product = (transportation.product || {}) as Record<string, unknown>;
       if ((product.class as number) === 100) continue; // Skip walking
 
-      const originInfo = (leg.origin || {}) as Record<string, unknown>;
+      const originInfo = (firstLeg.origin || {}) as Record<string, unknown>;
       const scheduledTime = (originInfo.departureTimePlanned as string) || '';
       const estimatedTime = (originInfo.departureTimeEstimated as string) || undefined;
 
@@ -245,10 +382,10 @@ const handler: Handler = async (event) => {
 
       const line = (transportation.disassembledName || transportation.number || '') as string;
       const tripId = (transportation.id as string) || `trip-${departures.length}`;
-      const isCancelled = leg.isCancelled === true;
+      const isCancelled = firstLeg.isCancelled === true;
 
-      const stopSequence = (leg.stopSequence || []) as Array<Record<string, unknown>>;
-      if (stopSequence.length > 0) {
+      const stopSequence = (firstLeg.stopSequence || []) as Array<Record<string, unknown>>;
+      if (!isMultiLeg && stopSequence.length > 0) {
         const stopsAtDest = stopSequenceContainsDestination(stopSequence, destination, destinationStopId);
         if (!stopsAtDest) continue;
       }
@@ -258,12 +395,83 @@ const handler: Handler = async (event) => {
       const productClass = product.class as number || 0;
       const productName = (product.name as string) || '';
       const transportType = detectTransportType(productClass, productName, line);
-      if (!modeMatches(transportType, selectedMode)) continue;
+      if (!isMultiLeg && !modeMatches(transportType, selectedMode)) continue;
       const dedupeKey = `${tripId}:${scheduledTime}:${platform}:${transportType}`;
       if (seenTrips.has(dedupeKey)) continue;
       seenTrips.add(dedupeKey);
       const transportDest = (transportation.destination || {}) as Record<string, unknown>;
-      departures.push({ tripId, route: line, destination: String(transportDest.name || destination), platform, scheduledTime, estimatedTime, status, delayMinutes, cancelled: isCancelled, transportType, alerts: [] });
+
+      // Build multi-leg info
+      let journeyLegs: JourneyLeg[] | undefined;
+      if (isMultiLeg) {
+        journeyLegs = [];
+        for (const leg of legs) {
+          const legTransport = (leg.transportation || {}) as Record<string, unknown>;
+          const legProduct = (legTransport.product || {}) as Record<string, unknown>;
+          const legClass = Number(legProduct.class) || 0;
+          const isWalking = legClass === 100;
+          const legOrigin = (leg.origin || {}) as Record<string, unknown>;
+          const legDest = (leg.destination || {}) as Record<string, unknown>;
+          const legLine = (legTransport.disassembledName || legTransport.number || '') as string;
+          const legStops = ((leg.stopSequence || []) as Array<unknown>).length;
+          const legSchedDep = (legOrigin.departureTimePlanned as string) || '';
+          const legEstDep = (legOrigin.departureTimeEstimated as string) || undefined;
+          const legSchedArr = (legDest.arrivalTimePlanned as string) || '';
+          const legEstArr = (legDest.arrivalTimeEstimated as string) || undefined;
+          const legPlatformRaw = (legOrigin.disassembledName as string) || '';
+          const legPlatformMatch = legPlatformRaw.match(/(\d+|[A-Z])$/);
+
+          let durationMinutes = 0;
+          if (legSchedDep && legSchedArr) {
+            durationMinutes = Math.round((new Date(legSchedArr).getTime() - new Date(legSchedDep).getTime()) / 60000);
+          }
+
+          const legProductName = (legProduct.name as string) || '';
+          const legMode = isWalking ? 'train' : detectTransportType(legClass, legProductName, legLine);
+
+          journeyLegs.push({
+            mode: isWalking ? 'train' : legMode,
+            route: isWalking ? 'Walk' : legLine,
+            origin: String((legOrigin.parent as Record<string, unknown>)?.name || legOrigin.name || ''),
+            destination: String((legDest.parent as Record<string, unknown>)?.name || legDest.name || ''),
+            platform: legPlatformMatch ? legPlatformMatch[1] : undefined,
+            scheduledDeparture: legSchedDep,
+            estimatedDeparture: legEstDep,
+            scheduledArrival: legSchedArr,
+            estimatedArrival: legEstArr,
+            durationMinutes: Math.max(0, durationMinutes),
+            stops: Math.max(0, legStops - 1),
+            isWalking,
+          });
+        }
+      }
+
+      // Parse alerts from journey
+      const journeyInfos = ((journey.infos || []) as Array<Record<string, unknown>>);
+      const alerts = parseServiceAlerts(journeyInfos);
+
+      // Fare estimate
+      const fareEstimate = estimateFare(originStopId, destinationStopId, scheduledTime);
+
+      departures.push({
+        tripId,
+        route: isMultiLeg ? transitLegs.map(l => {
+          const t = (l.transportation || {}) as Record<string, unknown>;
+          return (t.disassembledName || t.number || '') as string;
+        }).filter(Boolean).join(' → ') : line,
+        destination: String(transportDest.name || destination),
+        platform,
+        scheduledTime,
+        estimatedTime,
+        status,
+        delayMinutes,
+        cancelled: isCancelled,
+        transportType,
+        occupancy: 'unknown',
+        alerts,
+        legs: journeyLegs,
+        fareEstimate,
+      });
     }
 
     departures.sort((a, b) => new Date(a.scheduledTime).getTime() - new Date(b.scheduledTime).getTime());
@@ -316,7 +524,21 @@ async function fallbackDepartureMon(
     if (!modeMatches(transportType, selectedMode)) continue;
     const { status, delayMinutes } = getTimingStatus(scheduledTime, estimatedTime, isCancelled);
 
-    departures.push({ tripId: (transportation.id as string) || `trip-${departures.length}`, route: line, destination: String(transportDest.name || destination), platform, scheduledTime, estimatedTime, status, delayMinutes, cancelled: isCancelled, transportType, alerts: [] });
+    departures.push({
+      tripId: (transportation.id as string) || `trip-${departures.length}`,
+      route: line,
+      destination: String(transportDest.name || destination),
+      platform,
+      scheduledTime,
+      estimatedTime,
+      status,
+      delayMinutes,
+      cancelled: isCancelled,
+      transportType,
+      occupancy: parseOccupancy(stopEvent),
+      alerts: parseServiceAlerts((stopEvent.infos || []) as Array<Record<string, unknown>>),
+      fareEstimate: estimateFare(originStopId || '', destinationStopId || '', scheduledTime),
+    });
   }
 
   departures.sort((a, b) => new Date(a.scheduledTime).getTime() - new Date(b.scheduledTime).getTime());

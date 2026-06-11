@@ -20,6 +20,12 @@ export function ScheduleScreen() {
   const [showForm, setShowForm] = useState(Boolean(pendingAlertPrefill));
 
   useEffect(() => {
+    if (pendingAlertPrefill) {
+      setShowForm(true);
+    }
+  }, [pendingAlertPrefill]);
+
+  useEffect(() => {
     loadAlertSchedules();
     loadRouteCards();
   }, [loadAlertSchedules, loadRouteCards]);

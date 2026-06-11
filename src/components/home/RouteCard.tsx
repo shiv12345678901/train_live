@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback } from 'react';
 import type { RouteCard as RouteCardType, TrainDeparture, TransportMode } from '@/types';
+import { useCountdown, formatCountdown } from '@/hooks/useCountdown';
 
 interface RouteCardProps {
   card: RouteCardType;
@@ -15,23 +16,6 @@ function formatTime(isoTime: string): string {
   const date = new Date(isoTime);
   if (Number.isNaN(date.getTime())) return 'Live time unavailable';
   return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
-}
-
-function getMinutesUntil(isoTime: string): string {
-  const date = new Date(isoTime);
-  if (Number.isNaN(date.getTime())) return '';
-  const minutes = Math.max(0, Math.round((date.getTime() - Date.now()) / 60000));
-  return `${minutes} min`;
-}
-
-function getNextService(train?: TrainDeparture): { time: string; detail: string; tone: 'normal' | 'late' | 'cancelled' | 'notice' } {
-  if (!train) return { time: 'Live', detail: 'Tap for times', tone: 'notice' };
-  const displayTime = train.estimatedTime || train.scheduledTime;
-  const time = formatTime(displayTime);
-  if (train.cancelled) return { time, detail: 'Cancelled', tone: 'cancelled' };
-  if (train.status === 'delayed') return { time, detail: `${train.delayMinutes || '?'} min late`, tone: 'late' };
-  if (train.status === 'unknown') return { time, detail: 'No live update', tone: 'notice' };
-  return { time, detail: getMinutesUntil(displayTime), tone: 'normal' };
 }
 
 function RouteModeIcon({ mode }: { mode: TransportMode }) {
@@ -59,6 +43,29 @@ function RouteModeIcon({ mode }: { mode: TransportMode }) {
     );
   }
 
+  if (mode === 'ferry') {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M2 20c2-1 4-1 6 0s4 1 6 0 4-1 6 0" />
+        <path d="M4 16l2-8h12l2 8" />
+        <path d="M12 4v4" />
+        <path d="M10 4h4" />
+      </svg>
+    );
+  }
+
+  if (mode === 'metro') {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M6 4h12a2 2 0 012 2v10a4 4 0 01-4 4H8a4 4 0 01-4-4V6a2 2 0 012-2z" />
+        <path d="M9 22l1-2h4l1 2" />
+        <circle cx="9" cy="14" r="1.5" fill="currentColor" stroke="none" />
+        <circle cx="15" cy="14" r="1.5" fill="currentColor" stroke="none" />
+        <path d="M8 4l4 5 4-5" />
+      </svg>
+    );
+  }
+
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <rect x="4" y="10" width="16" height="8" rx="2"/>
@@ -78,12 +85,36 @@ function shortenStopName(name: string): string {
     .trim();
 }
 
+function LiveCountdownPill({ isoTime }: { isoTime: string }) {
+  const minutes = useCountdown(isoTime);
+  const label = formatCountdown(minutes);
+  if (!label || minutes === null || minutes > 90) return null;
+  
+  const urgency = minutes <= 2 ? 'urgent' : minutes <= 5 ? 'soon' : 'normal';
+  
+  return (
+    <span className={`countdown-pill countdown-pill--${urgency}`}>
+      {label}
+    </span>
+  );
+}
+
+function getCardTone(train?: TrainDeparture): 'normal' | 'late' | 'cancelled' | 'notice' {
+  if (!train) return 'notice';
+  if (train.cancelled) return 'cancelled';
+  if (train.status === 'delayed') return 'late';
+  if (train.status === 'unknown') return 'notice';
+  return 'normal';
+}
+
 export function RouteCard({ card, alertStatus, nextTrain, onClick, onEdit, onDelete, index = 0 }: RouteCardProps) {
   const shortOrigin = shortenStopName(card.origin);
   const shortDest = shortenStopName(card.destination);
   const isActive = alertStatus === 'Alert set';
-  const nextService = getNextService(nextTrain);
   const mode = card.mode ?? 'train';
+  const tone = getCardTone(nextTrain);
+
+  const displayTime = nextTrain ? (nextTrain.estimatedTime || nextTrain.scheduledTime) : null;
 
   const [showMenu, setShowMenu] = useState(false);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -116,10 +147,22 @@ export function RouteCard({ card, alertStatus, nextTrain, onClick, onEdit, onDel
     onClick();
   };
 
+  // Status detail text
+  let statusDetail = '';
+  if (!nextTrain) {
+    statusDetail = 'Tap for times';
+  } else if (nextTrain.cancelled) {
+    statusDetail = 'Cancelled';
+  } else if (nextTrain.status === 'delayed') {
+    statusDetail = `${nextTrain.delayMinutes || '?'} min late`;
+  } else if (nextTrain.status === 'unknown') {
+    statusDetail = 'No live update';
+  }
+
   return (
     <div className="route-card-wrapper" style={{ animationDelay: `${index * 80}ms` }}>
       <button
-        className={`route-card route-card--${nextService.tone}`}
+        className={`route-card route-card--${tone}`}
         onClick={handleClick}
         onPointerDown={handlePointerDown}
         onPointerUp={clearLongPress}
@@ -137,9 +180,20 @@ export function RouteCard({ card, alertStatus, nextTrain, onClick, onEdit, onDel
             </div>
           </div>
           <div className="route-card-next">
-            <span className="route-card-next-value">{nextService.time}</span>
-            <span className="route-card-next-detail">{nextService.detail}</span>
+            {displayTime ? (
+              <>
+                <LiveCountdownPill isoTime={displayTime} />
+                <span className="route-card-next-value">{formatTime(displayTime)}</span>
+                {statusDetail && <span className="route-card-next-detail">{statusDetail}</span>}
+              </>
+            ) : (
+              <>
+                <span className="route-card-next-value">Live</span>
+                <span className="route-card-next-detail">Tap for times</span>
+              </>
+            )}
           </div>
+          <span className="route-card-chevron" aria-hidden="true">›</span>
         </div>
         <div className="route-card-status-row">
           <div className={`route-card-badge ${isActive ? 'is-active' : ''}`}>
@@ -150,7 +204,11 @@ export function RouteCard({ card, alertStatus, nextTrain, onClick, onEdit, onDel
             </svg>
             {alertStatus}
           </div>
-          <span className="route-card-chevron" aria-hidden="true">›</span>
+          {nextTrain && nextTrain.alerts && nextTrain.alerts.length > 0 && (
+            <span className="route-card-alert-chip">
+              ⚠ {nextTrain.alerts.length} alert{nextTrain.alerts.length > 1 ? 's' : ''}
+            </span>
+          )}
         </div>
       </button>
 

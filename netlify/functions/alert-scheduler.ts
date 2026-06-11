@@ -297,6 +297,13 @@ const schedulerHandler: Handler = async () => {
         const sentKeys: string[] = delivery.sentKeys || [];
         const departureIso = departureDate.toISOString().slice(0, 10);
 
+        // Clean up sent keys from past dates to prevent unbounded growth
+        const todayPrefix = departureIso;
+        const freshSentKeys = sentKeys.filter((key) => key.includes(todayPrefix));
+        if (freshSentKeys.length < sentKeys.length) {
+          await deliveryRef.set({ sentKeys: freshSentKeys }, { merge: true });
+        }
+
         // ─── Fixed Reminders (20, 15, 10, 5 min) ─────────────────
         const fixedOffsets: number[] = alert.fixedReminderMinutes || [20, 15, 10, 5];
 
