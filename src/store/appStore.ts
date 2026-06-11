@@ -250,7 +250,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
       const originStopId = card?.originStopId;
       const destinationStopId = card?.destinationStopId;
 
-      const trains = await apiFetchLiveTrains(routeId, origin, destination, originStopId, destinationStopId, limit, card?.mode ?? 'train');
+      const trains = await apiFetchLiveTrains(routeId, origin, destination, originStopId, destinationStopId, limit, card?.mode ?? 'all');
       set((state) => {
         const updatedLiveTrains = { ...state.liveTrains, [routeId]: trains };
         setCachedLiveTrains(updatedLiveTrains);

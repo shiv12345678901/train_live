@@ -1,7 +1,11 @@
+/**
+ * Fetch with abort timeout.
+ * Default timeout increased to 15 seconds to handle slow TfNSW Trip Planner responses.
+ */
 export async function fetchWithTimeout(
   url: string,
   init: RequestInit = {},
-  timeoutMs = 8000
+  timeoutMs = 15000
 ): Promise<Response> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -12,4 +16,3 @@ export async function fetchWithTimeout(
     clearTimeout(timeout);
   }
 }
-

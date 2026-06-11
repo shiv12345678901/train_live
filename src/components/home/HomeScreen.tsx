@@ -53,11 +53,14 @@ export function HomeScreen() {
     loadRouteCards().finally(() => setInitialLoading(false));
   }, [loadRouteCards]);
 
-  // Initial fetch for ALL cards
+  // Initial fetch for ALL cards — staggered to avoid rate limiting (Issue 4)
   useEffect(() => {
+    let delay = 0;
     for (const card of routeCards) {
       if (!liveTrains[card.id] && !liveTrainsLoading[card.id]) {
-        void fetchLiveTrains(card.id);
+        const cardId = card.id;
+        setTimeout(() => { void fetchLiveTrains(cardId); }, delay);
+        delay += 500; // 500ms between each request
       }
     }
   }, [fetchLiveTrains, liveTrains, liveTrainsLoading, routeCards]);
