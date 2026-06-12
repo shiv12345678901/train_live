@@ -42,6 +42,11 @@ function getNumberArray(input: JsonObject, key: string): number[] | undefined {
   return numbers.length === value.length ? numbers : undefined;
 }
 
+function getNumber(input: JsonObject, key: string): number | undefined {
+  const value = input[key];
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
 function isTime(value: string): boolean {
   return /^([01]\d|2[0-3]):([0-5]\d)$/.test(value);
 }
@@ -113,16 +118,22 @@ export function scheduleCreateData(body: JsonObject) {
     days: getNumberArray(body, 'days') || [],
     oneTimeDate: getString(body, 'oneTimeDate') || null,
     enabled: typeof body.enabled === 'boolean' ? body.enabled : true,
-    fixedReminderMinutes: getNumberArray(body, 'fixedReminderMinutes') || [20, 15, 10, 5],
-    changeCheckMinutes: getNumberArray(body, 'changeCheckMinutes') || [18, 13],
+    fixedReminderMinutes: getNumberArray(body, 'fixedReminderMinutes') || [25, 20, 10, 5],
+    changeCheckMinutes: getNumberArray(body, 'changeCheckMinutes') || [],
     selectedTripId: getString(body, 'selectedTripId') || null,
     selectedPlatform: getString(body, 'selectedPlatform') || null,
+    targetRoute: getString(body, 'targetRoute') || null,
+    targetDestination: getString(body, 'targetDestination') || null,
+    timezone: getString(body, 'timezone') || 'Australia/Sydney',
+    delayRecheckMinutes: getNumber(body, 'delayRecheckMinutes') ?? 2,
+    fallbackWindowMinutes: getNumber(body, 'fallbackWindowMinutes') ?? 5,
+    notifyOnCancellationImmediately: typeof body.notifyOnCancellationImmediately === 'boolean' ? body.notifyOnCancellationImmediately : true,
   };
 }
 
 export function scheduleUpdates(body: JsonObject): JsonObject {
   const updates: JsonObject = {};
-  const textFields = ['routeCardId', 'title', 'departureTime', 'oneTimeDate', 'selectedTripId', 'selectedPlatform'];
+  const textFields = ['routeCardId', 'title', 'departureTime', 'oneTimeDate', 'selectedTripId', 'selectedPlatform', 'targetRoute', 'targetDestination', 'timezone'];
   for (const field of textFields) {
     if (field in body) updates[field] = getString(body, field) || null;
   }
@@ -130,8 +141,11 @@ export function scheduleUpdates(body: JsonObject): JsonObject {
     throw new Error('departureTime must be HH:mm');
   }
   if ('days' in body) updates.days = getNumberArray(body, 'days') || [];
-  if ('fixedReminderMinutes' in body) updates.fixedReminderMinutes = getNumberArray(body, 'fixedReminderMinutes') || [20, 15, 10, 5];
-  if ('changeCheckMinutes' in body) updates.changeCheckMinutes = getNumberArray(body, 'changeCheckMinutes') || [18, 13];
+  if ('fixedReminderMinutes' in body) updates.fixedReminderMinutes = getNumberArray(body, 'fixedReminderMinutes') || [25, 20, 10, 5];
+  if ('changeCheckMinutes' in body) updates.changeCheckMinutes = getNumberArray(body, 'changeCheckMinutes') || [];
+  if ('delayRecheckMinutes' in body) updates.delayRecheckMinutes = getNumber(body, 'delayRecheckMinutes') ?? 2;
+  if ('fallbackWindowMinutes' in body) updates.fallbackWindowMinutes = getNumber(body, 'fallbackWindowMinutes') ?? 5;
+  if (typeof body.notifyOnCancellationImmediately === 'boolean') updates.notifyOnCancellationImmediately = body.notifyOnCancellationImmediately;
   if (typeof body.enabled === 'boolean') updates.enabled = body.enabled;
   return updates;
 }

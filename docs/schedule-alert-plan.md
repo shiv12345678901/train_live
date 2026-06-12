@@ -45,3 +45,19 @@ Recommended backend matching order:
 4. Closest departure time to the saved target time.
 5. Same trip ID only as a same-day bonus, not as the recurring identity.
 
+
+## Implementation status
+
+Implemented in the scheduler MVP:
+
+- Schedules save target route, destination, timezone, fallback window, cancellation notification, and delay recheck settings.
+- The scheduler resolves the watched service around the Sydney-local target departure time.
+- Cancellation sends a Telegram alert and auto-switches reminders to the next matching same-platform, same-route, same-destination service within the fallback window.
+- Fixed reminders use 25, 20, 10, and 5 minutes.
+- Delay alerts repeat using the configured 2-minute recheck interval until departure.
+
+Future improvements:
+
+- Add richer UI controls for changing fallback and delay policy per alert.
+- Expose replacement/delivery state in the schedule list.
+- Add integration tests with mocked TfNSW and Telegram responses.

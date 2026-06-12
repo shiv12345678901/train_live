@@ -16,6 +16,8 @@ export interface AlertFormData {
   oneTimeDate?: string;
   tripId?: string;
   platform?: string;
+  targetRoute?: string;
+  targetDestination?: string;
 }
 
 const DAY_OPTIONS = [
@@ -103,6 +105,8 @@ export function AlertForm({ prefillData, routeCards, onSave, onCancel }: AlertFo
       oneTimeDate: !isRecurring ? oneTimeDate : undefined,
       tripId: prefillData?.tripId,
       platform: prefillData?.platform || undefined,
+      targetRoute: prefillData?.targetRoute,
+      targetDestination: prefillData?.targetDestination,
     });
   };
 
@@ -243,7 +247,7 @@ export function AlertForm({ prefillData, routeCards, onSave, onCancel }: AlertFo
             <path d="M13.73 21a2 2 0 0 1-3.46 0" />
           </svg>
           <span>
-            Check trains at {formatTimeDisplay(departureTime)} on {selectedRoute.title} and alert before departure
+            Watch the selected service at {formatTimeDisplay(departureTime)}. Reminders: 25, 20, 10 and 5 min. Delay checks repeat every 2 min; cancellations auto-switch to the next matching service.
           </span>
         </div>
       )}

@@ -4,7 +4,7 @@ import { RouteCardGrid } from './RouteCardGrid';
 import { RouteCreationSheet } from './RouteCreationSheet';
 import { TripPlanner } from './TripPlanner';
 import { useAppStore } from '@/store/appStore';
-import { toast } from '@/components/shared/Toast';
+import { toast } from '@/components/shared/toastStore';
 import { hapticLight, hapticSuccess } from '@/lib/haptics';
 import { usePullToRefresh } from '@/hooks/usePullToRefresh';
 import type { RouteCard as RouteCardType, TransportMode } from '@/types';

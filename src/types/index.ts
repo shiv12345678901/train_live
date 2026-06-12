@@ -27,10 +27,16 @@ export type AlertSchedule = {
   days: number[]; // 0=Sun, 1=Mon, ..., 6=Sat
   oneTimeDate?: string; // ISO date for one-time alerts
   enabled: boolean;
-  fixedReminderMinutes: number[]; // [20, 15, 10, 5]
-  changeCheckMinutes: number[]; // [18, 13]
+  fixedReminderMinutes: number[]; // [25, 20, 10, 5]
+  changeCheckMinutes: number[]; // legacy fixed checks
   selectedTripId?: string;
   selectedPlatform?: string;
+  targetRoute?: string;
+  targetDestination?: string;
+  timezone?: string;
+  delayRecheckMinutes?: number;
+  fallbackWindowMinutes?: number;
+  notifyOnCancellationImmediately?: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -111,6 +117,8 @@ export type AlertPrefillData = {
   departureTime: string;
   tripId?: string;
   platform?: string;
+  targetRoute?: string;
+  targetDestination?: string;
 };
 
 // App Settings

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { StopSearchInput } from './StopSearchInput';
 import { fetchLiveTrains } from '@/api/trainApi';
-import { toast } from '@/components/shared/Toast';
+import { toast } from '@/components/shared/toastStore';
 import { PRESET_STOPS } from '@/data/stops';
 import type { TrainDeparture, TransportMode } from '@/types';
 import { formatTransportTime } from '@/utils/timeUtils';

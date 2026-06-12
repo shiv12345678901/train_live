@@ -8,7 +8,7 @@ import { LoadingSkeleton } from './LoadingSkeleton';
 import { InlineError } from './InlineError';
 import { useAppStore } from '@/store/appStore';
 import type { TrainDeparture } from '@/types';
-import { formatTransportTime24 } from '@/utils/timeUtils';
+import { formatTransportTime, formatTransportTime24 } from '@/utils/timeUtils';
 import { getDepartureMode } from './transportMode';
 
 export function RouteDetailsPage() {
@@ -140,6 +140,8 @@ export function RouteDetailsPage() {
       departureTime,
       tripId: train.tripId,
       platform: train.platform,
+      targetRoute: train.route,
+      targetDestination: train.destination || card.destination,
     });
     navigate('/schedule');
   };
