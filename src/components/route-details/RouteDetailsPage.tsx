@@ -8,7 +8,7 @@ import { LoadingSkeleton } from './LoadingSkeleton';
 import { InlineError } from './InlineError';
 import { useAppStore } from '@/store/appStore';
 import type { TrainDeparture } from '@/types';
-import { formatTransportTime, formatTransportTime24 } from '@/utils/timeUtils';
+import { formatTransportTime24 } from '@/utils/timeUtils';
 import { getDepartureMode } from './transportMode';
 
 export function RouteDetailsPage() {
