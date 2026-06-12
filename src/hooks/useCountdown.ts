@@ -13,14 +13,14 @@ export function useCountdown(isoTime: string | undefined | null): number | null 
 
   useEffect(() => {
     if (!isoTime) {
-      setMinutesUntil(null);
-      return;
+      const timeoutId = window.setTimeout(() => setMinutesUntil(null), 0);
+      return () => window.clearTimeout(timeoutId);
     }
 
     const target = new Date(isoTime).getTime();
     if (Number.isNaN(target)) {
-      setMinutesUntil(null);
-      return;
+      const timeoutId = window.setTimeout(() => setMinutesUntil(null), 0);
+      return () => window.clearTimeout(timeoutId);
     }
 
     const update = () => {
@@ -28,7 +28,6 @@ export function useCountdown(isoTime: string | undefined | null): number | null 
       setMinutesUntil(Math.max(0, Math.round(diff)));
     };
 
-    update();
     const intervalId = window.setInterval(update, 1000);
     return () => window.clearInterval(intervalId);
   }, [isoTime]);

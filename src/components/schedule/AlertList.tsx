@@ -52,8 +52,10 @@ export function AlertList({ schedules, telegramConfigured }: AlertListProps) {
                 : schedule.days.map((d) => DAY_LABELS[d]).join(', ')
               }
             </div>
-            {schedule.selectedPlatform && (
-              <div className="alert-list-item-platform">Platform {schedule.selectedPlatform}</div>
+            {(schedule.targetRoute || schedule.selectedPlatform) && (
+              <div className="alert-list-item-platform">
+                {[schedule.targetRoute, schedule.selectedPlatform ? `Platform ${schedule.selectedPlatform}` : ''].filter(Boolean).join(' • ')}
+              </div>
             )}
           </div>
           <div className="alert-list-item-actions">
