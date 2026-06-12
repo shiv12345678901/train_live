@@ -33,7 +33,7 @@ export function HomeScreen() {
   const [editingCard, setEditingCard] = useState<RouteCardType | null>(null);
   const [showTripPlanner, setShowTripPlanner] = useState(false);
   const [initialLoading, setInitialLoading] = useState(routeCards.length === 0);
-  const refreshTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Pull-to-refresh
   const handleRefresh = useCallback(async () => {
@@ -66,23 +66,58 @@ export function HomeScreen() {
     }
   }, [routeCards, fetchLiveTrains]);
 
-  // Auto-refresh all cards every 30 seconds
+  // Dynamic dashboard refresh. Cards close to departure refresh more often,
+  // quieter cards back off so the whole dashboard is not constantly refreshed.
   useEffect(() => {
-    const refreshAll = () => {
-      if (document.visibilityState !== 'visible') return;
-      for (const card of routeCards) {
-        void fetchLiveTrains(card.id);
+    let cancelled = false;
+
+    const nextDelay = () => {
+      const minutesUntilNext = routeCards
+        .map((card) => liveTrains[card.id]?.[0])
+        .filter(Boolean)
+        .map((train) => new Date(train!.estimatedTime || train!.scheduledTime).getTime())
+        .filter((time) => Number.isFinite(time))
+        .map((time) => (time - Date.now()) / 60000);
+
+      const soonest = Math.min(...minutesUntilNext);
+      if (!Number.isFinite(soonest)) return 5 * 60 * 1000;
+      if (soonest <= 10) return 30 * 1000;
+      if (soonest <= 60) return 60 * 1000;
+      return 5 * 60 * 1000;
+    };
+
+    const scheduleNext = () => {
+      if (cancelled) return;
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+      if (document.visibilityState !== 'visible' || navigator.onLine === false || routeCards.length === 0) return;
+
+      refreshTimerRef.current = setTimeout(() => {
+        void Promise.allSettled(routeCards.map((card) => fetchLiveTrains(card.id))).finally(scheduleNext);
+      }, nextDelay());
+    };
+
+    const refreshWhenVisible = () => {
+      if (cancelled) return;
+      if (document.visibilityState === 'visible' && navigator.onLine !== false) {
+        void Promise.allSettled(routeCards.map((card) => fetchLiveTrains(card.id))).finally(scheduleNext);
+      } else if (refreshTimerRef.current) {
+        clearTimeout(refreshTimerRef.current);
       }
     };
 
-    refreshTimerRef.current = setInterval(refreshAll, 30000);
-    document.addEventListener('visibilitychange', refreshAll);
+    scheduleNext();
+    document.addEventListener('visibilitychange', refreshWhenVisible);
+    window.addEventListener('online', refreshWhenVisible);
+    window.addEventListener('offline', scheduleNext);
 
     return () => {
-      if (refreshTimerRef.current) clearInterval(refreshTimerRef.current);
-      document.removeEventListener('visibilitychange', refreshAll);
+      cancelled = true;
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+      document.removeEventListener('visibilitychange', refreshWhenVisible);
+      window.removeEventListener('online', refreshWhenVisible);
+      window.removeEventListener('offline', scheduleNext);
     };
-  }, [fetchLiveTrains, routeCards]);
+  }, [fetchLiveTrains, liveTrains, routeCards]);
 
   const handleSave = async (data: { title: string; origin: string; destination: string; mode: TransportMode; routeFilter: string[]; originStopId?: string; destinationStopId?: string }) => {
     // Duplicate route prevention (feature 29)
@@ -137,7 +172,11 @@ export function HomeScreen() {
   };
 
   const handlePin = (card: RouteCardType) => {
-    updateRouteCard(card.id, { pinned: !card.pinned });
+    const pinned = !card.pinned;
+    updateRouteCard(card.id, {
+      pinned,
+      pinnedAt: pinned ? new Date().toISOString() : null,
+    });
     hapticLight();
     toast(card.pinned ? 'Unpinned' : 'Pinned to top', 'success', 2000);
   };

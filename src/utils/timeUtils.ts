@@ -56,9 +56,41 @@ export function formatRelativeTime(minutes: number): string {
  * Returns time in HH:mm format.
  */
 export function formatDepartureDisplay(isoTime: string): string {
+  return formatTransportTime24(isoTime) || '--:--';
+}
+
+
+export const TRANSPORT_TIME_ZONE = 'Australia/Sydney';
+
+const TRANSPORT_TIME_FORMATTER = new Intl.DateTimeFormat('en-AU', {
+  timeZone: TRANSPORT_TIME_ZONE,
+  hour: 'numeric',
+  minute: '2-digit',
+  hour12: true,
+});
+
+const TRANSPORT_TIME_24_FORMATTER = new Intl.DateTimeFormat('en-AU', {
+  timeZone: TRANSPORT_TIME_ZONE,
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: false,
+  hourCycle: 'h23',
+});
+
+/**
+ * Format TfNSW times in Sydney time regardless of the viewer/server timezone.
+ */
+export function formatTransportTime(isoTime: string, fallback = 'Live time unavailable'): string {
   const date = new Date(isoTime);
-  if (isNaN(date.getTime())) return '--:--';
-  const hours = date.getHours().toString().padStart(2, '0');
-  const minutes = date.getMinutes().toString().padStart(2, '0');
-  return `${hours}:${minutes}`;
+  if (Number.isNaN(date.getTime())) return fallback;
+  return TRANSPORT_TIME_FORMATTER.format(date);
+}
+
+/**
+ * Format TfNSW times as HH:mm in Sydney time for schedule form values.
+ */
+export function formatTransportTime24(isoTime: string): string {
+  const date = new Date(isoTime);
+  if (Number.isNaN(date.getTime())) return '';
+  return TRANSPORT_TIME_24_FORMATTER.format(date);
 }
