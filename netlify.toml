@@ -10,6 +10,14 @@
   node_bundler = "esbuild"
   external_node_modules = ["firebase-admin"]
 
+# CORS headers for all function responses (fixes OPTIONS preflight in local dev)
+[[headers]]
+  for = "/.netlify/functions/*"
+  [headers.values]
+    Access-Control-Allow-Origin = "*"
+    Access-Control-Allow-Headers = "Content-Type, x-user-id"
+    Access-Control-Allow-Methods = "GET, POST, PUT, DELETE, OPTIONS"
+
 # Cache headers for API responses (Feature 37)
 [[headers]]
   for = "/.netlify/functions/routes-trains"

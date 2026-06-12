@@ -1,3 +1,4 @@
+import { handleCors, CORS_HEADERS } from '../../lib/cors';
 export async function handler() {
   return {
     statusCode: 200,

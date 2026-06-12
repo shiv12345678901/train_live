@@ -2,6 +2,7 @@ import type { Handler } from '@netlify/functions';
 import { fetchWithTimeout } from '../../lib/http';
 import { detectTransportType, getTimingStatus, type TransportType } from '../../lib/trainParsing';
 import { isRateLimited, getRateLimitHeaders } from '../../lib/rateLimit';
+import { handleCors, CORS_HEADERS } from '../../lib/cors';
 
 type OccupancyLevel = 'empty' | 'low' | 'medium' | 'high' | 'full' | 'unknown';
 
@@ -147,8 +148,12 @@ function parseAlerts(infos: Array<Record<string, unknown>>): ServiceAlert[] {
 // ─────────────────────────────────────────────────────────────────────
 
 const handler: Handler = async (event) => {
+  // CORS preflight
+  const corsResponse = handleCors(event.httpMethod);
+  if (corsResponse) return corsResponse;
+
   if (event.httpMethod !== 'GET') {
-    return { statusCode: 405, body: JSON.stringify({ error: 'Method not allowed' }) };
+    return { statusCode: 405, headers: CORS_HEADERS, body: JSON.stringify({ error: 'Method not allowed' }) };
   }
 
   // Rate limiting
@@ -179,7 +184,18 @@ const handler: Handler = async (event) => {
     if (!apiKey) return { statusCode: 503, body: JSON.stringify({ error: 'TFN_API_KEY not configured' }) };
 
     // ─── PRIMARY: Trip Planner (best for A→B routing) ──────────────
-    const departures = await fetchViaTripPlanner(apiKey, origin, destination, originStopId, destinationStopId, selectedMode, resultLimit);
+    // IMPORTANT: Always use station NAMES with type=any for Trip Planner.
+    // The Trip Planner handles name resolution far better than raw stop IDs.
+    // Only use stopId if it came from the Stop Finder API (7-8 digit EFA format).
+    const useOriginId = originStopId && originStopId.length >= 7;
+    const useDestId = destinationStopId && destinationStopId.length >= 7;
+
+    const departures = await fetchViaTripPlanner(
+      apiKey, origin, destination,
+      useOriginId ? originStopId : '',
+      useDestId ? destinationStopId : '',
+      selectedMode, resultLimit
+    );
 
     if (departures.length > 0) {
       return { statusCode: 200, body: JSON.stringify(departures.slice(0, resultLimit)) };
@@ -208,10 +224,12 @@ async function fetchViaTripPlanner(
   selectedMode: RouteMode,
   resultLimit: number
 ): Promise<TrainDeparture[]> {
-  const originType = originStopId ? 'stop' : 'any';
-  const originName = originStopId || origin;
-  const destType = destinationStopId ? 'stop' : 'any';
-  const destName = destinationStopId || destination;
+  // Use stop ID only if it's a proper 7-8 digit EFA ID.
+  // Otherwise use station name with type=any (Trip Planner resolves it perfectly).
+  const originType = (originStopId && originStopId.length >= 7) ? 'stop' : 'any';
+  const originName = (originStopId && originStopId.length >= 7) ? originStopId : origin;
+  const destType = (destinationStopId && destinationStopId.length >= 7) ? 'stop' : 'any';
+  const destName = (destinationStopId && destinationStopId.length >= 7) ? destinationStopId : destination;
   const tripCount = Math.min(Math.max(resultLimit + 3, 8), 20);
 
   const url = `https://api.transport.nsw.gov.au/v1/tp/trip?outputFormat=rapidJSON&coordOutputFormat=EPSG%3A4326&depArrMacro=dep&type_origin=${originType}&name_origin=${encodeURIComponent(originName)}&type_destination=${destType}&name_destination=${encodeURIComponent(destName)}&calcNumberOfTrips=${tripCount}&TfNSWTR=true&version=10.2.1.42`;
@@ -341,35 +359,41 @@ async function fetchViaDepartureMonitor(
   selectedMode: RouteMode,
   resultLimit: number
 ): Promise<TrainDeparture[]> {
-  // If no stopId, resolve via stop finder first
-  let dmName = originStopId || '';
-  let dmType = 'stop';
+  // Only use stopId for DM if it's a proper 7-8 digit EFA ID.
+  // The old 6-digit IDs (200060 etc.) cause wrong platform/schedule data.
+  let dmName = '';
+  let dmType = 'any';
+
+  if (originStopId && originStopId.length >= 7) {
+    dmName = originStopId;
+    dmType = 'stop';
+  }
 
   if (!dmName) {
-    // Try stop finder to get a proper ID
+    // Try stop finder to get a proper EFA ID
     try {
-      const sfUrl = `https://api.transport.nsw.gov.au/v1/tp/stop_finder?outputFormat=rapidJSON&type_sf=any&name_sf=${encodeURIComponent(origin)}&coordOutputFormat=EPSG%3A4326&TfNSWSF=true&version=10.2.1.42`;
+      const sfUrl = `https://api.transport.nsw.gov.au/v1/tp/stop_finder?outputFormat=rapidJSON&type_sf=stop&name_sf=${encodeURIComponent(origin)}&coordOutputFormat=EPSG%3A4326&TfNSWSF=true&version=10.2.1.42`;
       const sfRes = await fetchWithTimeout(sfUrl, { headers: { 'Authorization': `apikey ${apiKey}` } }, 6000);
       if (sfRes.ok) {
         const sfData = (await sfRes.json()) as Record<string, unknown>;
         const locs = (sfData?.locations || []) as Array<Record<string, unknown>>;
         for (const loc of locs) {
-          if (loc.isGlobalId && (loc.type === 'stop' || loc.type === 'poi')) {
-            dmName = loc.id as string;
+          const locId = String(loc.id || '');
+          // Only accept proper 7+ digit EFA IDs
+          if (loc.isGlobalId && locId.length >= 7 && (loc.type === 'stop' || loc.type === 'poi')) {
+            dmName = locId;
+            dmType = 'stop';
             break;
           }
         }
-        // If no global ID, try first result with any ID
-        if (!dmName && locs.length > 0 && locs[0].id) {
-          dmName = locs[0].id as string;
-        }
       }
     } catch { /* continue */ }
+  }
 
-    if (!dmName) {
-      dmName = origin;
-      dmType = 'any';
-    }
+  // If we still don't have a proper ID, use station name with type=any
+  if (!dmName) {
+    dmName = origin;
+    dmType = 'any';
   }
 
   const dmUrl = `https://api.transport.nsw.gov.au/v1/tp/departure_mon?outputFormat=rapidJSON&coordOutputFormat=EPSG%3A4326&mode=direct&type_dm=${dmType}&name_dm=${encodeURIComponent(dmName)}&departureMonitorMacro=true&TfNSWDM=true&version=10.2.1.42&limit=50`;

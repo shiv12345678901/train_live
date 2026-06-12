@@ -1,7 +1,9 @@
+import { handleCors, CORS_HEADERS } from '../../lib/cors';
 import type { Handler } from '@netlify/functions';
 import { getAlertSchedulesRef, getAlertDeliveryStateRef } from '../../lib/firestore';
 
 const handler: Handler = async (event) => {
+  const corsResp = handleCors(event.httpMethod); if (corsResp) return corsResp;
   if (event.httpMethod !== 'DELETE') {
     return { statusCode: 405, body: JSON.stringify({ error: 'Method not allowed' }) };
   }
