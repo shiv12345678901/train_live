@@ -121,11 +121,116 @@ function inferModeFromStops(origin?: string, destination?: string): TransportMod
 }
 
 /**
+ * Keep pinned routes first while preserving manual order elsewhere.
+ */
+function sortRouteCards(cards: RouteCard[]): RouteCard[] {
+  return [...cards].sort((a, b) => {
+    if (a.pinned && !b.pinned) return -1;
+    if (!a.pinned && b.pinned) return 1;
+
+    if (a.pinned && b.pinned) {
+      const aPinnedAt = a.pinnedAt ? new Date(a.pinnedAt).getTime() : 0;
+      const bPinnedAt = b.pinnedAt ? new Date(b.pinnedAt).getTime() : 0;
+      if (aPinnedAt !== bPinnedAt) return bPinnedAt - aPinnedAt;
+    }
+
+    return a.order - b.order;
+  });
+}
+
+function normalizeRouteCard(card: RouteCard): RouteCard {
+  return {
+    ...card,
+    pinned: card.pinned === true,
+    pinnedAt: card.pinned ? card.pinnedAt ?? card.updatedAt ?? card.createdAt ?? null : null,
+  };
+}
+
+/**
  * Migrate route cards — ensure data integrity on load.
  */
 function migrateRouteCards(cards: RouteCard[]): RouteCard[] {
-  // No migration needed currently — all stop ID formats are valid
-  return cards;
+  return sortRouteCards(cards.map(normalizeRouteCard));
+}
+
+function toRouteCardSaveInput(card: RouteCard): Omit<RouteCard, 'id' | 'createdAt' | 'updatedAt'> {
+  return {
+    title: card.title,
+    origin: card.origin,
+    originStopId: card.originStopId,
+    destination: card.destination,
+    destinationStopId: card.destinationStopId,
+    mode: card.mode,
+    routeFilter: card.routeFilter,
+    order: card.order,
+    enabled: card.enabled,
+    pinned: card.pinned === true,
+    pinnedAt: card.pinned === true ? card.pinnedAt ?? card.updatedAt ?? card.createdAt ?? null : null,
+  };
+}
+
+function routeSignature(card: RouteCard): string {
+  return [card.title, card.origin, card.destination]
+    .map((value) => value.trim().toLowerCase())
+    .join('::');
+}
+
+function isNewerRouteCard(local: RouteCard, remote: RouteCard): boolean {
+  return new Date(local.updatedAt).getTime() > new Date(remote.updatedAt).getTime();
+}
+
+function remapLocalAlertScheduleRouteIds(localId: string, remoteId: string): void {
+  const schedules = getLocalAlertSchedules();
+  if (!schedules.some((schedule) => schedule.routeCardId === localId)) return;
+  setLocalAlertSchedules(schedules.map((schedule) =>
+    schedule.routeCardId === localId ? { ...schedule, routeCardId: remoteId } : schedule
+  ));
+}
+
+async function syncLocalRouteCardsToFirestore(localCards: RouteCard[], remoteCards: RouteCard[]): Promise<RouteCard[]> {
+  if (localCards.length === 0) return migrateRouteCards(remoteCards);
+
+  const mergedById = new Map(remoteCards.map((card) => [card.id, normalizeRouteCard(card)]));
+  const remoteSignatures = new Map(remoteCards.map((card) => [routeSignature(card), normalizeRouteCard(card)]));
+
+  for (const localCard of localCards.map(normalizeRouteCard)) {
+    const remoteById = mergedById.get(localCard.id);
+
+    if (remoteById) {
+      const pinnedChanged = localCard.pinned !== remoteById.pinned || (localCard.pinnedAt ?? null) !== (remoteById.pinnedAt ?? null);
+      if (pinnedChanged || isNewerRouteCard(localCard, remoteById)) {
+        const saved = await apiUpdateRouteCard(localCard.id, toRouteCardSaveInput(localCard));
+        mergedById.set(saved.id, normalizeRouteCard(saved));
+      }
+      continue;
+    }
+
+    const remoteBySignature = remoteSignatures.get(routeSignature(localCard));
+    if (remoteBySignature && localCard.id.startsWith('local-')) {
+      remapPendingRouteReferences(localCard.id, remoteBySignature.id);
+      remapLocalAlertScheduleRouteIds(localCard.id, remoteBySignature.id);
+      mergedById.set(remoteBySignature.id, normalizeRouteCard({
+        ...remoteBySignature,
+        pinned: localCard.pinned,
+        pinnedAt: localCard.pinnedAt,
+      }));
+      if (localCard.pinned !== remoteBySignature.pinned || (localCard.pinnedAt ?? null) !== (remoteBySignature.pinnedAt ?? null)) {
+        const saved = await apiUpdateRouteCard(remoteBySignature.id, {
+          pinned: localCard.pinned,
+          pinnedAt: localCard.pinnedAt,
+        });
+        mergedById.set(saved.id, normalizeRouteCard(saved));
+      }
+      continue;
+    }
+
+    const saved = await createRouteCard(toRouteCardSaveInput(localCard));
+    mergedById.set(saved.id, normalizeRouteCard(saved));
+    remapPendingRouteReferences(localCard.id, saved.id);
+    remapLocalAlertScheduleRouteIds(localCard.id, saved.id);
+  }
+
+  return migrateRouteCards([...mergedById.values()]);
 }
 
 export const useAppStore = create<AppState>()((set, get) => ({
@@ -135,19 +240,21 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   loadRouteCards: async () => {
     // Always load from localStorage first (instant)
-    const local = getLocalRouteCards();
+    const local = migrateRouteCards(getLocalRouteCards());
     if (local.length > 0) {
       set({ routeCards: local });
+      setLocalRouteCards(local);
     }
 
-    // Then try to sync from backend (silently, don't spam console)
+    // Then try to sync with Firestore. Local saved routes win when Firestore
+    // is missing them, so existing device routes are uploaded instead of being
+    // left local-only.
     try {
-      const remote = await fetchRouteCards();
-      if (remote.length > 0 || local.length === 0) {
-        set({ routeCards: remote });
-        setLocalRouteCards(remote);
-        setLastSyncTime();
-      }
+      const remote = migrateRouteCards(await fetchRouteCards());
+      const synced = await syncLocalRouteCardsToFirestore(local, remote);
+      set({ routeCards: synced });
+      setLocalRouteCards(synced);
+      setLastSyncTime();
     } catch {
       // Backend unavailable — local data is still displayed, no console noise
     }

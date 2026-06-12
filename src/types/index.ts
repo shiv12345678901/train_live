@@ -13,6 +13,7 @@ export type RouteCard = {
   order: number;
   enabled: boolean;
   pinned?: boolean;
+  pinnedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 };
