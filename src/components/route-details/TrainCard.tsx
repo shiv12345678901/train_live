@@ -55,16 +55,17 @@ function OccupancyIndicator({ level }: { level: OccupancyLevel }) {
   );
 }
 
-// ─── Fare Display ────────────────────────────────────────────────────
+// ─── Trip Duration Display ────────────────────────────────────────────
 
-function FareDisplay({ fare }: { fare: TrainDeparture['fareEstimate'] }) {
-  if (!fare) return null;
-  const displayFare = fare.isPeakNow ? fare.adultPeak : fare.adultOffPeak;
-  return (
-    <span className="train-card-fare">
-      ${displayFare.toFixed(2)} {fare.isPeakNow ? '' : '(off-peak)'}
-    </span>
-  );
+function TripDuration({ train }: { train: TrainDeparture }) {
+  if (!train.scheduledTime) return null;
+  // Estimate duration from first stop to last (using fare estimate timing data isn't available,
+  // so we'll show it if legs data exists)
+  if (train.legs && train.legs.length > 0) {
+    const totalMin = train.legs.reduce((sum, l) => sum + l.durationMinutes, 0);
+    if (totalMin > 0) return <span className="train-card-duration">{totalMin} min trip</span>;
+  }
+  return null;
 }
 
 // ─── Multi-leg Journey Display ───────────────────────────────────────
@@ -260,7 +261,7 @@ export function TrainCard({ train, onBellTap, onTap }: TrainCardProps) {
           <OccupancyIndicator level={train.occupancy} />
         )}
         {train.fareEstimate && (
-          <FareDisplay fare={train.fareEstimate} />
+          <TripDuration train={train} />
         )}
         <AlertChips alerts={train.alerts} />
       </div>

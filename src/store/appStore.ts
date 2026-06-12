@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { RouteCard, TrainDeparture, AlertSchedule, AlertPrefillData, AppSettings, TransportMode } from '@/types';
 import { fetchRouteCards, createRouteCard, deleteRouteCard as apiDeleteRouteCard, updateRouteOrder, updateRouteCard as apiUpdateRouteCard } from '@/api/routeApi';
 import { fetchLiveTrains as apiFetchLiveTrains } from '@/api/trainApi';
+import { PRESET_STOPS } from '@/data/stops';
 import { fetchSchedules, createSchedule, updateSchedule, deleteSchedule as apiDeleteSchedule } from '@/api/scheduleApi';
 import { saveSettings } from '@/api/settingsApi';
 import {
@@ -285,13 +286,23 @@ export const useAppStore = create<AppState>()((set, get) => ({
     }));
 
     try {
-      // For local-only routes, pass origin/destination directly
       const state = get();
       const card = state.routeCards.find((c) => c.id === routeId);
-      const origin = card?.origin;
-      const destination = card?.destination;
-      const originStopId = card?.originStopId;
-      const destinationStopId = card?.destinationStopId;
+      const origin = card?.origin || '';
+      const destination = card?.destination || '';
+
+      // Look up stop IDs from preset data if not saved on the card
+      let originStopId = card?.originStopId || '';
+      let destinationStopId = card?.destinationStopId || '';
+
+      if (!originStopId) {
+        const preset = PRESET_STOPS.find((s) => s.name.toLowerCase() === origin.toLowerCase());
+        if (preset) originStopId = preset.stopId;
+      }
+      if (!destinationStopId) {
+        const preset = PRESET_STOPS.find((s) => s.name.toLowerCase() === destination.toLowerCase());
+        if (preset) destinationStopId = preset.stopId;
+      }
 
       const trains = await apiFetchLiveTrains(routeId, origin, destination, originStopId, destinationStopId, limit, card?.mode || inferModeFromStops(origin, destination));
       set((state) => {

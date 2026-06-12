@@ -39,7 +39,7 @@ export function AlertList({ schedules, telegramConfigured }: AlertListProps) {
 
   return (
     <div className="alert-list">
-      {schedules.map((schedule) => (
+      {[...schedules].sort((a, b) => a.departureTime.localeCompare(b.departureTime)).map((schedule) => (
         <div key={schedule.id} className="alert-list-item">
           <div className="alert-list-item-main">
             <div className="alert-list-item-header">

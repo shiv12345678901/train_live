@@ -2,6 +2,7 @@ import { useRef, useEffect } from 'react';
 import { Outlet } from 'react-router-dom';
 import { BottomNavigation } from './BottomNavigation';
 import { ToastContainer } from '@/components/shared/Toast';
+import { OfflineBanner } from '@/components/shared/OfflineBanner';
 
 export function AppShell() {
   const mainRef = useRef<HTMLElement>(null);
@@ -22,6 +23,7 @@ export function AppShell() {
 
   return (
     <div className="app-shell">
+      <OfflineBanner />
       <main className="app-main" ref={mainRef}>
         <Outlet />
       </main>

@@ -97,7 +97,7 @@ export function ScheduleScreen() {
       <div>
         <PageHeader title="New Alert" backButton onBack={handleCancel} />
         {pendingAlertPrefill && <AlertSummary data={pendingAlertPrefill} />}
-        <div style={{ padding: '0 16px' }}>
+        <div className="schedule-content">
           <AlertForm
             prefillData={pendingAlertPrefill}
             routeCards={routeCards}
@@ -112,8 +112,8 @@ export function ScheduleScreen() {
   return (
     <div>
       <PageHeader title="Schedule" />
-      <div style={{ padding: '0 16px' }}>
-        <button className="btn-primary" onClick={() => setShowForm(true)} style={{ marginBottom: '16px', width: '100%' }}>
+      <div className="schedule-content">
+        <button className="btn-primary schedule-new-btn" onClick={() => setShowForm(true)}>
           New Alert
         </button>
         <AlertList schedules={alertSchedules} telegramConfigured={settings.telegramConnected} />

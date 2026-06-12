@@ -131,6 +131,7 @@ export function HomeScreen() {
   };
 
   const handleDelete = (card: RouteCardType) => {
+    if (!window.confirm(`Delete "${card.title}"? This can't be undone.`)) return;
     deleteRouteCard(card.id);
     hapticLight();
     toast('Route deleted', 'info');
@@ -177,17 +178,18 @@ export function HomeScreen() {
       </div>
 
       <header className="home-header">
-        <h1 className="home-header-title">
-          {getGreeting()} <span className="home-header-wave" aria-hidden="true">👋</span>
-        </h1>
+        <div className="home-header-row">
+          <h1 className="home-header-title">
+            {getGreeting()} <span className="home-header-wave" aria-hidden="true">👋</span>
+          </h1>
+          <button className="home-search-btn" onClick={() => setShowTripPlanner(true)} type="button" aria-label="Plan a trip">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="11" cy="11" r="8" />
+              <path d="M21 21l-4.35-4.35" />
+            </svg>
+          </button>
+        </div>
         <p className="home-header-subtitle">Your routes</p>
-        <button className="home-trip-planner-btn" onClick={() => setShowTripPlanner(true)} type="button">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="11" cy="11" r="8" />
-            <path d="M21 21l-4.35-4.35" />
-          </svg>
-          Plan a trip
-        </button>
       </header>
 
       {/* Trip Planner Overlay (feature 26) */}
@@ -195,7 +197,7 @@ export function HomeScreen() {
         <TripPlanner onClose={() => setShowTripPlanner(false)} />
       )}
 
-      {/* Skeleton loading state (feature 14) */}
+      {/* Skeleton loading state */}
       {initialLoading ? (
         <div className="home-skeleton">
           {[0, 1, 2, 3].map((i) => (
@@ -203,6 +205,15 @@ export function HomeScreen() {
               <div className="skeleton-shimmer" />
             </div>
           ))}
+        </div>
+      ) : routeCards.length === 0 ? (
+        <div className="home-onboarding">
+          <div className="home-onboarding-icon">🚆</div>
+          <h2 className="home-onboarding-title">Welcome to Train Live</h2>
+          <p className="home-onboarding-text">Add your first route to see live departures, set alerts, and never miss a train.</p>
+          <button className="btn-primary home-onboarding-btn" onClick={() => { hapticLight(); setShowCreation(true); }} type="button">
+            Add your first route
+          </button>
         </div>
       ) : (
         <RouteCardGrid

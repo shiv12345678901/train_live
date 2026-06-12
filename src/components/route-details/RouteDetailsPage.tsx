@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { TrainCard, ModeFilter } from './TrainCard';
 import { TrainDetailSheet } from './TrainDetailSheet';
+import { AlertsBanner } from './AlertsBanner';
 import { LoadingSkeleton } from './LoadingSkeleton';
 import { InlineError } from './InlineError';
 import { useAppStore } from '@/store/appStore';
@@ -145,14 +146,14 @@ export function RouteDetailsPage() {
 
   return (
     <div className="route-details-page">
-      <PageHeader title={card.title} backButton />
-      <div className="route-details-meta">
-        <div className="route-details-meta-copy">
+      <div className="route-details-header">
+        <PageHeader title={card.title} backButton />
+        <div className="route-details-header-meta">
           <span className="route-details-direction">{card.origin} → {card.destination}</span>
           <span className="route-details-freshness">{updatedLabel}</span>
         </div>
-        <button className="route-details-refresh" type="button" onClick={refreshLiveTrains} aria-label="Refresh live departures">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <button className={`route-details-refresh ${isLoading ? 'is-spinning' : ''}`} type="button" onClick={refreshLiveTrains} aria-label="Refresh">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
             <path d="M21 12a9 9 0 0 1-15.5 6.2" />
             <path d="M3 12a9 9 0 0 1 15.5-6.2" />
             <path d="M18 2v4h-4" />
@@ -163,6 +164,12 @@ export function RouteDetailsPage() {
       <div className="route-details-trains">
         {isLoading && <LoadingSkeleton />}
         {error && <InlineError message={error} onRetry={refreshLiveTrains} />}
+        {!isLoading && !error && (() => {
+          // Collect unique alerts from all trains
+          const allAlerts = uniqueTrains.flatMap(t => t.alerts || []);
+          const uniqueAlerts = allAlerts.filter((a, i) => allAlerts.findIndex(b => b.id === a.id || b.title === a.title) === i);
+          return uniqueAlerts.length > 0 ? <AlertsBanner alerts={uniqueAlerts} /> : null;
+        })()}
         {!isLoading && !error && uniqueTrains.length > 0 && savedMode === 'all' && (
           <ModeFilter trains={uniqueTrains} activeFilter={routeFilter} onFilter={handleFilter} />
         )}
@@ -179,14 +186,28 @@ export function RouteDetailsPage() {
             <p className="route-details-empty-copy">Refresh live departures or edit the saved route mode.</p>
           </div>
         )}
-        {!isLoading && !error && displayTrains.map((train) => (
-          <TrainCard
-            key={`${train.tripId}:${train.scheduledTime}:${train.platform}:${getDepartureMode(train)}`}
-            train={train}
-            onBellTap={() => handleBellTap(train)}
-            onTap={() => setSelectedTrain(train)}
-          />
-        ))}
+        {!isLoading && !error && displayTrains.map((train) => {
+          const isSelected = selectedTrain?.tripId === train.tripId && selectedTrain?.scheduledTime === train.scheduledTime;
+          return (
+          <div key={`${train.tripId}:${train.scheduledTime}:${train.platform}:${getDepartureMode(train)}`} className={isSelected ? 'train-card-with-detail' : ''}>
+            <TrainCard
+              train={train}
+              onBellTap={() => handleBellTap(train)}
+              onTap={() => setSelectedTrain(isSelected ? null : train)}
+            />
+            {isSelected && card && (
+              <TrainDetailSheet
+                train={train}
+                origin={card.origin}
+                destination={card.destination}
+                originStopId={card.originStopId}
+                destinationStopId={card.destinationStopId}
+                onClose={() => setSelectedTrain(null)}
+              />
+            )}
+          </div>
+          );
+        })}
         {!isLoading && !error && hasMore && (
           <button
             className="btn-secondary load-more-btn"
@@ -197,18 +218,6 @@ export function RouteDetailsPage() {
           </button>
         )}
       </div>
-
-      {/* Train Detail Sheet */}
-      {selectedTrain && card && (
-        <TrainDetailSheet
-          train={selectedTrain}
-          origin={card.origin}
-          destination={card.destination}
-          originStopId={card.originStopId}
-          destinationStopId={card.destinationStopId}
-          onClose={() => setSelectedTrain(null)}
-        />
-      )}
     </div>
   );
 }

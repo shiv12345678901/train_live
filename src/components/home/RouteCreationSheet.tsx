@@ -28,6 +28,7 @@ export function RouteCreationSheet({ onSave, onCancel, editCard }: RouteCreation
   const [availableModes, setAvailableModes] = useState<TransportMode[]>([]);
   const [modesLoading, setModesLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
   const canFetchModes = Boolean(origin.trim() && destination.trim() && origin.trim().toLowerCase() !== destination.trim().toLowerCase());
 
   useEffect(() => {
@@ -85,6 +86,7 @@ export function RouteCreationSheet({ onSave, onCancel, editCard }: RouteCreation
       return;
     }
 
+    setSaving(true);
     onSave({ title: title.trim(), origin: origin.trim(), destination: destination.trim(), mode, routeFilter: [], originStopId: originStopId || undefined, destinationStopId: destinationStopId || undefined });
   };
 
@@ -134,8 +136,8 @@ export function RouteCreationSheet({ onSave, onCancel, editCard }: RouteCreation
           </div>
         </div>
         <div className="form-actions">
-          <button type="button" className="btn-secondary" onClick={onCancel}>Cancel</button>
-          <button type="submit" className="btn-primary">Save</button>
+          <button type="button" className="btn-secondary" onClick={onCancel} disabled={saving}>Cancel</button>
+          <button type="submit" className="btn-primary" disabled={saving}>{saving ? 'Saving...' : 'Save'}</button>
         </div>
       </form>
     </div>

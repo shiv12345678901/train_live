@@ -121,6 +121,19 @@ export function SettingsScreen() {
           }
           status={healthState === 'connected' ? 'connected' : healthState === 'offline' ? 'disconnected' : 'none'}
         />
+        <SettingRow
+          label="Clear cached data"
+          value="Remove all locally stored train times and sync data"
+          onClick={() => {
+            if (window.confirm('Clear all cached data? Your saved routes and alerts will remain.')) {
+              localStorage.removeItem('trainlive:liveTrainsCache');
+              localStorage.removeItem('trainlive:liveTrainsCacheTime');
+              localStorage.removeItem('trainlive:pendingOps');
+              localStorage.removeItem('trainlive:lastSync');
+              window.location.reload();
+            }
+          }}
+        />
       </section>
     </div>
   );

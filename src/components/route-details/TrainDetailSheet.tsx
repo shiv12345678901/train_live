@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState } from 'react';
 import type { TrainDeparture } from '@/types';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '/.netlify/functions';
@@ -32,21 +32,20 @@ function formatTime(iso: string): string {
   return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
 }
 
+function cleanName(name: string): string {
+  return name.replace(/\s*Station\s*/gi, '').replace(/,.*$/, '').trim();
+}
+
 export function TrainDetailSheet({ train, origin, destination, originStopId, destinationStopId, onClose }: TrainDetailSheetProps) {
   const [tripData, setTripData] = useState<TripData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [isClosing, setIsClosing] = useState(false);
-  const [sheetHeight, setSheetHeight] = useState<'half' | 'full'>('half');
-  const currentStopRef = useRef<HTMLDivElement>(null);
-  const dragStartY = useRef(0);
-  const isDragging = useRef(false);
+  const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
     const fetchStops = async () => {
       try {
         const params = new URLSearchParams({
-          origin,
-          destination,
+          origin, destination,
           scheduledTime: train.scheduledTime || '',
           tripId: train.tripId || '',
           platform: train.platform || '',
@@ -57,9 +56,7 @@ export function TrainDetailSheet({ train, origin, destination, originStopId, des
         const res = await fetch(`${API_BASE}/trip-stops?${params}`);
         if (res.ok) {
           const data = await res.json();
-          if (data.stops?.length > 0) {
-            setTripData(data);
-          }
+          if (data.stops?.length > 0) setTripData(data);
         }
       } catch { /* ignore */ }
       setLoading(false);
@@ -67,147 +64,99 @@ export function TrainDetailSheet({ train, origin, destination, originStopId, des
     fetchStops();
   }, [destination, destinationStopId, origin, originStopId, train.platform, train.route, train.scheduledTime, train.tripId]);
 
-  // Auto-scroll to current stop
-  useEffect(() => {
-    if (tripData && currentStopRef.current) {
-      setTimeout(() => {
-        currentStopRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      }, 400);
-    }
-  }, [tripData]);
+  if (loading) {
+    return <div className="train-detail-mini"><span className="train-detail-mini-loading">Loading stops...</span></div>;
+  }
 
-  // Prevent body scroll
-  useEffect(() => {
-    document.body.style.overflow = 'hidden';
-    return () => { document.body.style.overflow = ''; };
-  }, []);
+  if (!tripData || tripData.stops.length === 0) {
+    return null;
+  }
 
-  const handleClose = useCallback(() => {
-    setIsClosing(true);
-    setTimeout(onClose, 300);
-  }, [onClose]);
-
-  // Drag to resize / close
-  const handleDragStart = (e: React.TouchEvent) => {
-    dragStartY.current = e.touches[0].clientY;
-    isDragging.current = true;
-  };
-
-  const handleDragMove = (e: React.TouchEvent) => {
-    if (!isDragging.current) return;
-    const deltaY = e.touches[0].clientY - dragStartY.current;
-    if (deltaY > 80) {
-      isDragging.current = false;
-      if (sheetHeight === 'full') {
-        setSheetHeight('half');
-      } else {
-        handleClose();
-      }
-    }
-    if (deltaY < -50 && sheetHeight === 'half') {
-      isDragging.current = false;
-      setSheetHeight('full');
-    }
-  };
-
-  const handleDragEnd = () => { isDragging.current = false; };
-
-  // Identify origin and destination in stops
+  const stops = tripData.stops;
   const originLower = origin.toLowerCase().replace(/\s*station\s*/gi, '').trim();
   const destLower = destination.toLowerCase().replace(/\s*station\s*/gi, '').trim();
 
+  // Build condensed view: first stop, ... middle ..., last stop
+  const firstStop = stops[0];
+  const lastStop = stops[stops.length - 1];
+  const middleIndex = Math.floor(stops.length / 2);
+  const middleStop = stops.length > 2 ? stops[middleIndex] : null;
+  const skippedBefore = middleIndex - 1;
+  const skippedAfter = stops.length - middleIndex - 2;
+
+  if (expanded) {
+    return (
+      <div className="train-detail-mini expanded">
+        <div className="train-detail-mini-header">
+          <span className="train-detail-mini-route">{train.route} → {cleanName(tripData.destination)}</span>
+          <button className="train-detail-mini-close" onClick={onClose} type="button">✕</button>
+        </div>
+        <div className="train-detail-mini-stops">
+          {stops.map((stop, idx) => {
+            const sn = stop.name.toLowerCase().replace(/\s*station\s*/gi, '').replace(/,.*$/, '').trim();
+            const isO = sn.includes(originLower) || originLower.includes(sn);
+            const isD = sn.includes(destLower) || destLower.includes(sn);
+            return (
+              <div key={idx} className={`train-detail-mini-stop ${stop.isPassed ? 'passed' : ''} ${isO || isD || stop.isCurrent ? 'highlight' : ''}`}>
+                <div className={`train-detail-mini-dot ${stop.isPassed ? 'passed' : ''} ${stop.isCurrent ? 'current' : ''} ${isO ? 'origin' : ''} ${isD ? 'dest' : ''}`} />
+                <span className="train-detail-mini-name">
+                  {cleanName(stop.name)}
+                  {isO && <span className="tdm-badge">Get on</span>}
+                  {isD && <span className="tdm-badge dest">Get off</span>}
+                </span>
+                <span className="train-detail-mini-time">
+                  {stop.departureTime ? formatTime(stop.departureTime) : stop.arrivalTime ? formatTime(stop.arrivalTime) : ''}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+        <button className="train-detail-mini-toggle" onClick={() => setExpanded(false)} type="button">Show less</button>
+      </div>
+    );
+  }
+
+  // Condensed view
   return (
-    <div className={`train-detail-overlay ${isClosing ? 'closing' : ''}`} onClick={handleClose}>
-      <div
-        className={`train-detail-sheet train-detail-sheet--${sheetHeight} ${isClosing ? 'closing' : ''}`}
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header — draggable */}
-        <div
-          className="train-detail-header"
-          onTouchStart={handleDragStart}
-          onTouchMove={handleDragMove}
-          onTouchEnd={handleDragEnd}
-        >
-          <div className="train-detail-handle" />
-          <div className="train-detail-title-row">
-            <div>
-              <h3 className="train-detail-title">{train.route}</h3>
-              <p className="train-detail-subtitle">
-                {tripData?.destination || train.destination || destination.replace(/\s*Station\s*/gi, '')}
-              </p>
-            </div>
-            <button className="train-detail-close" onClick={handleClose} type="button">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-                <path d="M18 6L6 18M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
+    <div className="train-detail-mini">
+      <div className="train-detail-mini-stops">
+        <div className="train-detail-mini-stop highlight">
+          <div className="train-detail-mini-dot origin" />
+          <span className="train-detail-mini-name">{cleanName(firstStop.name)}<span className="tdm-badge">Get on</span></span>
+          <span className="train-detail-mini-time">{firstStop.departureTime ? formatTime(firstStop.departureTime) : ''}</span>
         </div>
 
-        {/* Stop sequence */}
-        <div className="train-detail-stops">
-          {loading && (
-            <div className="train-detail-loading">
-              <div className="train-detail-loading-dot" />
-              <span>Loading stops...</span>
-            </div>
-          )}
+        {skippedBefore > 0 && (
+          <div className="train-detail-mini-skip">
+            <div className="train-detail-mini-dot-line" />
+            <span>{skippedBefore} stop{skippedBefore > 1 ? 's' : ''}</span>
+          </div>
+        )}
 
-          {!loading && (!tripData || tripData.stops.length === 0) && (
-            <p className="train-detail-empty">Stop details unavailable for this service</p>
-          )}
+        {middleStop && (
+          <div className="train-detail-mini-stop">
+            <div className="train-detail-mini-dot" />
+            <span className="train-detail-mini-name">{cleanName(middleStop.name)}</span>
+            <span className="train-detail-mini-time">{middleStop.departureTime ? formatTime(middleStop.departureTime) : middleStop.arrivalTime ? formatTime(middleStop.arrivalTime) : ''}</span>
+          </div>
+        )}
 
-          {!loading && tripData && tripData.stops.length > 0 && (
-            <div className="train-detail-stop-list">
-              {tripData.stops.map((stop, idx) => {
-                const stopNameLower = stop.name.toLowerCase().replace(/\s*station\s*/gi, '').replace(/,.*$/, '').trim();
-                const isOrigin = stopNameLower.includes(originLower) || originLower.includes(stopNameLower);
-                const isDest = stopNameLower.includes(destLower) || destLower.includes(stopNameLower);
-                const isHighlighted = isOrigin || isDest || stop.isCurrent;
+        {skippedAfter > 0 && (
+          <div className="train-detail-mini-skip">
+            <div className="train-detail-mini-dot-line" />
+            <span>{skippedAfter} stop{skippedAfter > 1 ? 's' : ''}</span>
+          </div>
+        )}
 
-                return (
-                  <div
-                    key={idx}
-                    ref={stop.isCurrent ? currentStopRef : undefined}
-                    className={`train-detail-stop ${stop.isPassed ? 'passed' : ''} ${stop.isCurrent ? 'current' : ''} ${isHighlighted ? 'highlighted' : ''}`}
-                  >
-                    {/* Timeline */}
-                    <div className="train-detail-timeline">
-                      <div className={`train-detail-dot ${stop.isCurrent ? 'current' : stop.isPassed ? 'passed' : ''} ${isOrigin ? 'origin' : ''} ${isDest ? 'dest' : ''}`} />
-                      {idx < tripData.stops.length - 1 && (
-                        <div className={`train-detail-line ${stop.isPassed ? 'passed' : ''}`} />
-                      )}
-                    </div>
-
-                    {/* Stop info */}
-                    <div className="train-detail-stop-info">
-                      <span className={`train-detail-stop-name ${isHighlighted ? 'bold' : ''}`}>
-                        {stop.name.replace(/\s*Station\s*/gi, '').replace(/,.*$/, '')}
-                      </span>
-                      {isOrigin && <span className="train-detail-badge">Board</span>}
-                      {isDest && <span className="train-detail-badge dest">Alight</span>}
-                      {stop.isCurrent && !isOrigin && !isDest && <span className="train-detail-badge current">Now</span>}
-                      {stop.platform && (
-                        <span className="train-detail-stop-platform">Platform {stop.platform}</span>
-                      )}
-                    </div>
-
-                    {/* Time */}
-                    <span className={`train-detail-stop-time ${isHighlighted ? 'bold' : ''}`}>
-                      {stop.departureTime
-                        ? formatTime(stop.departureTime)
-                        : stop.arrivalTime
-                          ? formatTime(stop.arrivalTime)
-                          : ''}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          )}
+        <div className="train-detail-mini-stop highlight">
+          <div className="train-detail-mini-dot dest" />
+          <span className="train-detail-mini-name">{cleanName(lastStop.name)}<span className="tdm-badge dest">Get off</span></span>
+          <span className="train-detail-mini-time">{lastStop.arrivalTime ? formatTime(lastStop.arrivalTime) : lastStop.departureTime ? formatTime(lastStop.departureTime) : ''}</span>
         </div>
       </div>
+      <button className="train-detail-mini-toggle" onClick={() => setExpanded(true)} type="button">
+        Show all {stops.length} stops
+      </button>
     </div>
   );
 }

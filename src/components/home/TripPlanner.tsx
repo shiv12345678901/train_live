@@ -2,10 +2,17 @@ import { useState } from 'react';
 import { StopSearchInput } from './StopSearchInput';
 import { fetchLiveTrains } from '@/api/trainApi';
 import { toast } from '@/components/shared/Toast';
+import { PRESET_STOPS } from '@/data/stops';
 import type { TrainDeparture, TransportMode } from '@/types';
 
 interface TripPlannerProps {
   onClose: () => void;
+}
+
+function getStopId(name: string, manualId: string): string | undefined {
+  if (manualId) return manualId;
+  const preset = PRESET_STOPS.find((s) => s.name.toLowerCase() === name.toLowerCase());
+  return preset?.stopId;
 }
 
 export function TripPlanner({ onClose }: TripPlannerProps) {
@@ -30,21 +37,24 @@ export function TripPlanner({ onClose }: TripPlannerProps) {
     setLoading(true);
     setSearched(true);
     try {
+      const resolvedOriginId = getStopId(origin.trim(), originStopId);
+      const resolvedDestId = getStopId(destination.trim(), destinationStopId);
+
       const trains = await fetchLiveTrains(
         '__trip_plan__',
         origin.trim(),
         destination.trim(),
-        originStopId || undefined,
-        destinationStopId || undefined,
+        resolvedOriginId,
+        resolvedDestId,
         10,
         'all' as TransportMode
       );
       setResults(trains);
       if (trains.length === 0) {
-        toast('No services found for this route', 'info');
+        toast('No services found', 'info');
       }
     } catch {
-      toast('Failed to search. Check your connection.', 'error');
+      toast('Search failed. Check connection.', 'error');
       setResults([]);
     } finally {
       setLoading(false);
@@ -93,18 +103,15 @@ export function TripPlanner({ onClose }: TripPlannerProps) {
             return (
               <div key={`${train.tripId}-${i}`} className="trip-planner-result">
                 <div className="trip-planner-result-left">
-                  <span className="trip-planner-result-route">{train.route}</span>
-                  <span className="trip-planner-result-dest">{train.destination}</span>
-                  {train.platform && <span className="trip-planner-result-platform">Plt {train.platform}</span>}
+                  <span className="trip-planner-result-route">{train.route || '—'}</span>
+                  <span className="trip-planner-result-dest">
+                    → {(train.destination || '').replace(/,.*$/, '').replace(/\s*Station\s*/gi, '')}
+                  </span>
+                  {train.platform && <span className="trip-planner-result-platform">Platform {train.platform}</span>}
                 </div>
                 <div className="trip-planner-result-right">
                   <span className="trip-planner-result-time">{timeStr}</span>
                   <span className="trip-planner-result-mins">{mins > 0 ? `${mins} min` : 'Due'}</span>
-                  {train.fareEstimate && (
-                    <span className="trip-planner-result-fare">
-                      ${(train.fareEstimate.isPeakNow ? train.fareEstimate.adultPeak : train.fareEstimate.adultOffPeak).toFixed(2)}
-                    </span>
-                  )}
                 </div>
               </div>
             );

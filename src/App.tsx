@@ -4,19 +4,22 @@ import { HomeScreen } from '@/components/home/HomeScreen';
 import { RouteDetailsPage } from '@/components/route-details/RouteDetailsPage';
 import { ScheduleScreen } from '@/components/schedule/ScheduleScreen';
 import { SettingsScreen } from '@/components/settings/SettingsScreen';
+import { ErrorBoundary } from '@/components/shared/ErrorBoundary';
 
 function App() {
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route element={<AppShell />}>
-          <Route index element={<HomeScreen />} />
-          <Route path="/route/:id" element={<RouteDetailsPage />} />
-          <Route path="/schedule" element={<ScheduleScreen />} />
-          <Route path="/settings" element={<SettingsScreen />} />
-        </Route>
-      </Routes>
-    </BrowserRouter>
+    <ErrorBoundary>
+      <BrowserRouter>
+        <Routes>
+          <Route element={<AppShell />}>
+            <Route index element={<HomeScreen />} />
+            <Route path="/route/:id" element={<RouteDetailsPage />} />
+            <Route path="/schedule" element={<ScheduleScreen />} />
+            <Route path="/settings" element={<SettingsScreen />} />
+          </Route>
+        </Routes>
+      </BrowserRouter>
+    </ErrorBoundary>
   );
 }
 
