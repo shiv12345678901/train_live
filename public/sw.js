@@ -29,6 +29,9 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
+  // Only handle http/https requests — skip chrome-extension:// etc.
+  if (!url.protocol.startsWith('http')) return;
+
   // API requests: network first, cache fallback
   if (url.pathname.includes('.netlify/functions/')) {
     event.respondWith(
@@ -64,7 +67,7 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
       caches.match(event.request).then((cached) => {
         const fetchPromise = fetch(event.request).then((response) => {
-          if (response.ok) {
+          if (response.ok && url.protocol.startsWith('http')) {
             const clone = response.clone();
             caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
           }
