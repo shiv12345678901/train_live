@@ -8,6 +8,7 @@ import { LoadingSkeleton } from './LoadingSkeleton';
 import { InlineError } from './InlineError';
 import { useAppStore } from '@/store/appStore';
 import type { TrainDeparture } from '@/types';
+import { formatTransportTime, formatTransportTime24 } from '@/utils/timeUtils';
 import { getDepartureMode } from './transportMode';
 
 export function RouteDetailsPage() {
@@ -18,6 +19,7 @@ export function RouteDetailsPage() {
   const liveTrains = useAppStore((s) => s.liveTrains);
   const liveTrainsLoading = useAppStore((s) => s.liveTrainsLoading);
   const liveTrainsError = useAppStore((s) => s.liveTrainsError);
+  const liveTrainsUpdatedAt = useAppStore((s) => s.liveTrainsUpdatedAt);
   const fetchLiveTrains = useAppStore((s) => s.fetchLiveTrains);
   const setPendingAlertPrefill = useAppStore((s) => s.setPendingAlertPrefill);
 
@@ -29,7 +31,6 @@ export function RouteDetailsPage() {
   const [routeFilter, setRouteFilter] = useState('all');
   const [visibleCount, setVisibleCount] = useState(10);
   const [selectedTrain, setSelectedTrain] = useState<TrainDeparture | null>(null);
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [routesLoaded, setRoutesLoaded] = useState(routeCards.length > 0);
   const savedMode = card?.mode || 'train';
 
@@ -51,7 +52,6 @@ export function RouteDetailsPage() {
   const refreshLiveTrains = async () => {
     if (!id || !cardId) return;
     await fetchLiveTrains(id, 20); // Always fetch 20 trains
-    setLastUpdated(new Date());
   };
 
   useEffect(() => {
@@ -65,33 +65,66 @@ export function RouteDetailsPage() {
   // Fetch trains once on mount with limit=20
   useEffect(() => {
     if (id && cardId) {
-      void fetchLiveTrains(id, 20).finally(() => setLastUpdated(new Date()));
+      void fetchLiveTrains(id, 20);
     }
   }, [id, cardId, fetchLiveTrains]);
 
-  // Auto-refresh every 30 seconds
+  // Dynamic auto-refresh: refresh faster when a departure is near, slower when
+  // the timetable is farther out, and do nothing while hidden/offline.
   useEffect(() => {
     if (!id || !cardId) return;
 
-    const refreshIfVisible = () => {
-      if (document.visibilityState === 'visible') {
-        void fetchLiveTrains(id, 20).finally(() => setLastUpdated(new Date()));
+    let cancelled = false;
+    let timeoutId: number | undefined;
+
+    const nextDelay = () => {
+      const nextTrain = uniqueTrains[0];
+      if (!nextTrain) return 5 * 60 * 1000;
+
+      const nextTime = new Date(nextTrain.estimatedTime || nextTrain.scheduledTime).getTime();
+      const minutesAway = (nextTime - Date.now()) / 60000;
+
+      if (minutesAway <= 5) return 15 * 1000;
+      if (minutesAway <= 30) return 30 * 1000;
+      if (minutesAway <= 120) return 60 * 1000;
+      return 5 * 60 * 1000;
+    };
+
+    const scheduleNext = () => {
+      if (cancelled) return;
+      window.clearTimeout(timeoutId);
+      if (document.visibilityState !== 'visible' || navigator.onLine === false) return;
+
+      timeoutId = window.setTimeout(() => {
+        void fetchLiveTrains(id, 20).finally(scheduleNext);
+      }, nextDelay());
+    };
+
+    const refreshWhenVisible = () => {
+      if (cancelled) return;
+      if (document.visibilityState === 'visible' && navigator.onLine !== false) {
+        void fetchLiveTrains(id, 20).finally(scheduleNext);
+      } else {
+        window.clearTimeout(timeoutId);
       }
     };
 
-    const intervalId = window.setInterval(refreshIfVisible, 30000);
-    document.addEventListener('visibilitychange', refreshIfVisible);
+    scheduleNext();
+    document.addEventListener('visibilitychange', refreshWhenVisible);
+    window.addEventListener('online', refreshWhenVisible);
+    window.addEventListener('offline', scheduleNext);
 
     return () => {
-      window.clearInterval(intervalId);
-      document.removeEventListener('visibilitychange', refreshIfVisible);
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+      document.removeEventListener('visibilitychange', refreshWhenVisible);
+      window.removeEventListener('online', refreshWhenVisible);
+      window.removeEventListener('offline', scheduleNext);
     };
-  }, [cardId, fetchLiveTrains, id]);
+  }, [cardId, fetchLiveTrains, id, uniqueTrains]);
 
   function formatPrefillTime(isoTime: string): string {
-    const date = new Date(isoTime);
-    if (Number.isNaN(date.getTime())) return '';
-    return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+    return formatTransportTime24(isoTime);
   }
 
   const handleBellTap = (train: TrainDeparture) => {
@@ -120,9 +153,12 @@ export function RouteDetailsPage() {
     setVisibleCount((prev) => prev + 5);
   };
 
-  const updatedLabel = lastUpdated
-    ? `Updated ${lastUpdated.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true })}`
+  const updatedAt = id ? liveTrainsUpdatedAt[id] : undefined;
+  const updatedLabel = updatedAt
+    ? `Updated ${formatTransportTime(updatedAt)}`
     : 'Live departures';
+  const showBlockingLoading = isLoading && displayTrains.length === 0;
+  const showBlockingError = Boolean(error) && displayTrains.length === 0;
 
   if (!card && !routesLoaded) {
     return (
@@ -162,31 +198,31 @@ export function RouteDetailsPage() {
         </button>
       </div>
       <div className="route-details-trains">
-        {isLoading && <LoadingSkeleton />}
-        {error && <InlineError message={error} onRetry={refreshLiveTrains} />}
-        {!isLoading && !error && (() => {
+        {showBlockingLoading && <LoadingSkeleton />}
+        {error && <InlineError message={displayTrains.length > 0 ? `${error} — showing saved departures` : error} onRetry={refreshLiveTrains} />}
+        {!showBlockingLoading && !showBlockingError && (() => {
           // Collect unique alerts from all trains
           const allAlerts = uniqueTrains.flatMap(t => t.alerts || []);
           const uniqueAlerts = allAlerts.filter((a, i) => allAlerts.findIndex(b => b.id === a.id || b.title === a.title) === i);
           return uniqueAlerts.length > 0 ? <AlertsBanner alerts={uniqueAlerts} /> : null;
         })()}
-        {!isLoading && !error && uniqueTrains.length > 0 && savedMode === 'all' && (
+        {!showBlockingLoading && !showBlockingError && uniqueTrains.length > 0 && savedMode === 'all' && (
           <ModeFilter trains={uniqueTrains} activeFilter={routeFilter} onFilter={handleFilter} />
         )}
-        {!isLoading && !error && uniqueTrains.length === 0 && (
+        {!showBlockingLoading && !showBlockingError && uniqueTrains.length === 0 && (
           <div className="route-details-empty-state">
             <p className="route-details-empty-title">No services found for this route</p>
             <p className="route-details-empty-copy">Check the station names or refresh live departures.</p>
             <button className="btn-secondary route-details-empty-action" type="button" onClick={refreshLiveTrains}>Refresh</button>
           </div>
         )}
-        {!isLoading && !error && uniqueTrains.length > 0 && displayTrains.length === 0 && (
+        {!showBlockingLoading && !showBlockingError && uniqueTrains.length > 0 && displayTrains.length === 0 && (
           <div className="route-details-empty-state">
             <p className="route-details-empty-title">No {savedMode === 'all' ? routeFilter : savedMode.replace('_', ' ')} services found</p>
             <p className="route-details-empty-copy">Refresh live departures or edit the saved route mode.</p>
           </div>
         )}
-        {!isLoading && !error && displayTrains.map((train) => {
+        {!showBlockingLoading && !showBlockingError && displayTrains.map((train) => {
           const isSelected = selectedTrain?.tripId === train.tripId && selectedTrain?.scheduledTime === train.scheduledTime;
           return (
           <div key={`${train.tripId}:${train.scheduledTime}:${train.platform}:${getDepartureMode(train)}`} className={isSelected ? 'train-card-with-detail' : ''}>
@@ -208,7 +244,7 @@ export function RouteDetailsPage() {
           </div>
           );
         })}
-        {!isLoading && !error && hasMore && (
+        {!showBlockingLoading && !showBlockingError && hasMore && (
           <button
             className="btn-secondary load-more-btn"
             onClick={handleLoadMore}

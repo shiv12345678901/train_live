@@ -37,7 +37,7 @@ function write<T>(key: string, data: T): void {
 
 // ─── Route Cards ────────────────────────────────────────────────────
 
-import type { RouteCard, AlertSchedule, AppSettings } from '@/types';
+import type { RouteCard, AlertSchedule, AppSettings, TrainDeparture } from '@/types';
 
 export function getLocalRouteCards(): RouteCard[] {
   return read<RouteCard[]>(KEYS.routeCards, []);
@@ -127,15 +127,73 @@ export function setLastSyncTime(): void {
 
 // ─── Live Trains Cache (Feature 33: Offline mode) ───────────────────
 
-import type { TrainDeparture } from '@/types';
+interface LiveTrainsCacheEntry {
+  trains: TrainDeparture[];
+  fetchedAt: string;
+}
+
+const LIVE_TRAIN_CACHE_GRACE_MS = 5 * 60 * 1000;
+
+function isCurrentDeparture(train: TrainDeparture): boolean {
+  const time = new Date(train.estimatedTime || train.scheduledTime).getTime();
+  return Number.isFinite(time) && time >= Date.now() - LIVE_TRAIN_CACHE_GRACE_MS;
+}
+
+function readLiveTrainCacheEntries(): Record<string, LiveTrainsCacheEntry> {
+  const raw = read<Record<string, TrainDeparture[] | LiveTrainsCacheEntry>>(KEYS.liveTrainsCache, {});
+  const fallbackFetchedAt = localStorage.getItem(KEYS.liveTrainsCacheTime) || new Date(0).toISOString();
+  const entries: Record<string, LiveTrainsCacheEntry> = {};
+
+  for (const [routeId, value] of Object.entries(raw)) {
+    if (Array.isArray(value)) {
+      entries[routeId] = { trains: value.filter(isCurrentDeparture), fetchedAt: fallbackFetchedAt };
+      continue;
+    }
+
+    entries[routeId] = {
+      trains: (value.trains || []).filter(isCurrentDeparture),
+      fetchedAt: value.fetchedAt || fallbackFetchedAt,
+    };
+  }
+
+  return Object.fromEntries(Object.entries(entries).filter(([, entry]) => entry.trains.length > 0));
+}
 
 export function getCachedLiveTrains(): Record<string, TrainDeparture[]> {
-  return read<Record<string, TrainDeparture[]>>(KEYS.liveTrainsCache, {});
+  const entries = readLiveTrainCacheEntries();
+  return Object.fromEntries(Object.entries(entries).map(([routeId, entry]) => [routeId, entry.trains]));
+}
+
+export function getCachedLiveTrainUpdatedAt(): Record<string, string> {
+  const entries = readLiveTrainCacheEntries();
+  return Object.fromEntries(Object.entries(entries).map(([routeId, entry]) => [routeId, entry.fetchedAt]));
+}
+
+export function setCachedRouteLiveTrains(routeId: string, trains: TrainDeparture[]): void {
+  const entries = readLiveTrainCacheEntries();
+  const fetchedAt = new Date().toISOString();
+  const currentTrains = trains.filter(isCurrentDeparture);
+
+  if (currentTrains.length > 0) {
+    entries[routeId] = { trains: currentTrains, fetchedAt };
+  } else {
+    delete entries[routeId];
+  }
+
+  write(KEYS.liveTrainsCache, entries);
+  localStorage.setItem(KEYS.liveTrainsCacheTime, fetchedAt);
 }
 
 export function setCachedLiveTrains(data: Record<string, TrainDeparture[]>): void {
-  write(KEYS.liveTrainsCache, data);
-  localStorage.setItem(KEYS.liveTrainsCacheTime, new Date().toISOString());
+  const fetchedAt = new Date().toISOString();
+  const entries = Object.fromEntries(
+    Object.entries(data)
+      .map(([routeId, trains]) => [routeId, { trains: trains.filter(isCurrentDeparture), fetchedAt }] as const)
+      .filter(([, entry]) => entry.trains.length > 0)
+  );
+
+  write(KEYS.liveTrainsCache, entries);
+  localStorage.setItem(KEYS.liveTrainsCacheTime, fetchedAt);
 }
 
 export function getLiveTrainsCacheAge(): string {
