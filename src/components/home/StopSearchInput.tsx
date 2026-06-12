@@ -100,7 +100,7 @@ export function StopSearchInput({ id, label, value, onChange, placeholder }: Sto
       if (history.length > 0) {
         const historyAsPreset: PresetStop[] = history.map((h: SearchHistoryItem) => ({
           name: h.name,
-          stopId: h.stopId,
+          stopId: h.stopId || '',
           type: 'station' as const,
           zone: 'Recent',
         }));

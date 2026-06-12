@@ -22,7 +22,6 @@ export function HomeScreen() {
     routeCards,
     alertSchedules,
     liveTrains,
-    liveTrainsLoading,
     loadRouteCards,
     reorderRouteCards,
     saveRouteCard,

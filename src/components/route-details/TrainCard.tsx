@@ -8,12 +8,6 @@ interface TrainCardProps {
   onTap?: () => void;
 }
 
-function formatPlatform(raw: string): string {
-  const match = raw.match(/(\d+)$/);
-  if (match) return match[1];
-  return raw || '—';
-}
-
 function formatTime(isoTime: string): string {
   const date = new Date(isoTime);
   return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
