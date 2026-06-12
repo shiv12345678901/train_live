@@ -267,8 +267,8 @@ body {
   justify-content: space-between;
   gap: 10px;
   width: 100%;
-  min-height: 0;
   min-width: 0;
+  overflow: hidden;
 }
 
 .route-card-header {
@@ -276,8 +276,8 @@ body {
   align-items: center;
   gap: 12px;
   min-width: 0;
-  flex: 1 1 auto;
-  max-width: 100%;
+  flex: 1 1 0;
+  overflow: hidden;
 }
 
 .route-card-icon {
@@ -301,9 +301,9 @@ body {
 .route-card-info {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  max-width: 100%;
+  gap: 3px;
   min-width: 0;
+  overflow: hidden;
 }
 
 .route-card-title {
@@ -316,6 +316,7 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  max-width: 100%;
 }
 
 .route-card-badge {
@@ -414,10 +415,9 @@ body {
   flex-direction: column;
   align-items: flex-end;
   gap: 3px;
-  min-width: fit-content;
-  max-width: 40%;
-  text-align: right;
   flex-shrink: 0;
+  text-align: right;
+  max-width: 110px;
 }
 
 .route-card-next-label {
