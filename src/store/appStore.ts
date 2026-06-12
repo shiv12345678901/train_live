@@ -11,7 +11,7 @@ import {
   getLocalSettings, setLocalSettings,
   addPendingOp, getPendingOps, removePendingOp, updatePendingOp,
   setLastSyncTime,
-  getCachedLiveTrains, setCachedLiveTrains,
+  getCachedLiveTrains, getCachedLiveTrainUpdatedAt, setCachedRouteLiveTrains,
 } from './localStorage';
 
 interface AppState {
@@ -27,6 +27,7 @@ interface AppState {
   liveTrains: Record<string, TrainDeparture[]>;
   liveTrainsLoading: Record<string, boolean>;
   liveTrainsError: Record<string, string | null>;
+  liveTrainsUpdatedAt: Record<string, string>;
   fetchLiveTrains: (routeId: string, limit?: number) => Promise<void>;
 
   // Alert Schedules
@@ -290,6 +291,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
         const nextLiveTrains = { ...state.liveTrains };
         const nextLiveTrainsLoading = { ...state.liveTrainsLoading };
         const nextLiveTrainsError = { ...state.liveTrainsError };
+        const nextLiveTrainsUpdatedAt = { ...state.liveTrainsUpdatedAt };
         if (nextLiveTrains[localCard.id]) {
           nextLiveTrains[savedCard.id] = nextLiveTrains[localCard.id];
           delete nextLiveTrains[localCard.id];
@@ -302,6 +304,10 @@ export const useAppStore = create<AppState>()((set, get) => ({
           nextLiveTrainsError[savedCard.id] = nextLiveTrainsError[localCard.id];
           delete nextLiveTrainsError[localCard.id];
         }
+        if (localCard.id in nextLiveTrainsUpdatedAt) {
+          nextLiveTrainsUpdatedAt[savedCard.id] = nextLiveTrainsUpdatedAt[localCard.id];
+          delete nextLiveTrainsUpdatedAt[localCard.id];
+        }
         setLocalRouteCards(updated);
         setLocalAlertSchedules(updatedSchedules);
         return {
@@ -310,6 +316,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
           liveTrains: nextLiveTrains,
           liveTrainsLoading: nextLiveTrainsLoading,
           liveTrainsError: nextLiveTrainsError,
+          liveTrainsUpdatedAt: nextLiveTrainsUpdatedAt,
         };
       });
       remapPendingRouteReferences(localCard.id, savedCard.id);
@@ -385,6 +392,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
   liveTrains: getCachedLiveTrains(),
   liveTrainsLoading: {},
   liveTrainsError: {},
+  liveTrainsUpdatedAt: getCachedLiveTrainUpdatedAt(),
 
   fetchLiveTrains: async (routeId, limit) => {
     set((state) => ({
@@ -413,10 +421,12 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
       const trains = await apiFetchLiveTrains(routeId, origin, destination, originStopId, destinationStopId, limit, card?.mode || inferModeFromStops(origin, destination));
       set((state) => {
+        const fetchedAt = new Date().toISOString();
         const updatedLiveTrains = { ...state.liveTrains, [routeId]: trains };
-        setCachedLiveTrains(updatedLiveTrains);
+        setCachedRouteLiveTrains(routeId, trains);
         return {
           liveTrains: updatedLiveTrains,
+          liveTrainsUpdatedAt: { ...state.liveTrainsUpdatedAt, [routeId]: fetchedAt },
           liveTrainsLoading: { ...state.liveTrainsLoading, [routeId]: false },
         };
       });
@@ -581,6 +591,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
               const nextLiveTrains = { ...state.liveTrains };
               const nextLiveTrainsLoading = { ...state.liveTrainsLoading };
               const nextLiveTrainsError = { ...state.liveTrainsError };
+              const nextLiveTrainsUpdatedAt = { ...state.liveTrainsUpdatedAt };
               if (nextLiveTrains[localId]) {
                 nextLiveTrains[saved.id] = nextLiveTrains[localId];
                 delete nextLiveTrains[localId];
@@ -593,6 +604,10 @@ export const useAppStore = create<AppState>()((set, get) => ({
                 nextLiveTrainsError[saved.id] = nextLiveTrainsError[localId];
                 delete nextLiveTrainsError[localId];
               }
+              if (localId in nextLiveTrainsUpdatedAt) {
+                nextLiveTrainsUpdatedAt[saved.id] = nextLiveTrainsUpdatedAt[localId];
+                delete nextLiveTrainsUpdatedAt[localId];
+              }
               setLocalRouteCards(updated);
               setLocalAlertSchedules(updatedSchedules);
               return {
@@ -601,6 +616,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
                 liveTrains: nextLiveTrains,
                 liveTrainsLoading: nextLiveTrainsLoading,
                 liveTrainsError: nextLiveTrainsError,
+                liveTrainsUpdatedAt: nextLiveTrainsUpdatedAt,
               };
             });
             remapPendingRouteReferences(localId, saved.id);
