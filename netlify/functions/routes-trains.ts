@@ -65,6 +65,69 @@ function modeMatches(actual: TransportType, selected: RouteMode): boolean {
   return selected === 'all' || actual === selected;
 }
 
+const NSW_TIME_ZONE = 'Australia/Sydney';
+
+function getSydneyDateParts(date: Date): Record<string, string> {
+  return Object.fromEntries(
+    new Intl.DateTimeFormat('en-AU', {
+      timeZone: NSW_TIME_ZONE,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+      hourCycle: 'h23',
+    }).formatToParts(date).map((part) => [part.type, part.value])
+  );
+}
+
+function buildSydneyTripPlannerTimeParams(isoTime: string, addMinutes = 0): string {
+  const date = new Date(isoTime);
+  if (Number.isNaN(date.getTime())) return '';
+  date.setMinutes(date.getMinutes() + addMinutes);
+
+  const parts = getSydneyDateParts(date);
+  return `&itdDate=${parts.year}${parts.month}${parts.day}&itdTime=${parts.hour}${parts.minute}`;
+}
+
+function getSydneyMinutesOfDay(isoTime: string): number | null {
+  const date = new Date(isoTime);
+  if (Number.isNaN(date.getTime())) return null;
+  const parts = getSydneyDateParts(date);
+  return Number(parts.hour) * 60 + Number(parts.minute);
+}
+
+function dedupeAndSortDepartures(departures: TrainDeparture[]): TrainDeparture[] {
+  const byKey = new Map<string, TrainDeparture>();
+
+  for (const departure of departures) {
+    const key = `${departure.tripId}:${departure.scheduledTime}:${departure.platform}`;
+    if (!byKey.has(key)) byKey.set(key, departure);
+  }
+
+  return [...byKey.values()].sort((a, b) => {
+    return new Date(a.scheduledTime).getTime() - new Date(b.scheduledTime).getTime();
+  });
+}
+
+function latestDepartureTime(departures: TrainDeparture[]): string | undefined {
+  return departures.reduce<string | undefined>((latest, departure) => {
+    if (!latest) return departure.scheduledTime;
+    return new Date(departure.scheduledTime).getTime() > new Date(latest).getTime()
+      ? departure.scheduledTime
+      : latest;
+  }, undefined);
+}
+
+function isWithinFutureScheduleWindow(isoTime: string): boolean {
+  const time = new Date(isoTime).getTime();
+  if (Number.isNaN(time)) return false;
+  // TfNSW trip planning supports explicit future itdDate/itdTime requests. Keep
+  // route details bounded to roughly today + tomorrow to avoid expensive scans.
+  return time <= Date.now() + 42 * 60 * 60 * 1000;
+}
+
 // ─── Platform Extraction ─────────────────────────────────────────────
 
 function extractPlatform(locationOrOrigin: Record<string, unknown>, transportType?: TransportType): string {
@@ -156,9 +219,11 @@ function isPeakTime(isoTime: string): boolean {
   const d = new Date(isoTime);
   if (Number.isNaN(d.getTime())) return true;
 
-  if (d.getDay() === 0 || d.getDay() === 6) return false;
+  const weekday = new Intl.DateTimeFormat('en-AU', { timeZone: NSW_TIME_ZONE, weekday: 'short' }).format(d);
+  if (weekday === 'Sat' || weekday === 'Sun') return false;
 
-  const minutes = d.getHours() * 60 + d.getMinutes();
+  const minutes = getSydneyMinutesOfDay(isoTime);
+  if (minutes === null) return true;
 
   return (minutes >= 390 && minutes < 600) || (minutes >= 900 && minutes < 1140);
 }
@@ -285,43 +350,27 @@ const handler: Handler = async (event) => {
       );
     }
 
-    // If DM didn't return enough, supplement with Trip Planner
+    // If DM doesn't fill the page, supplement with Trip Planner batches.
+    // Future batches use explicit Sydney-local itdDate/itdTime parameters so
+    // low-frequency routes can show later today and tomorrow instead of stopping
+    // after the short live departure window.
     if (departures.length < resultLimit) {
-      const tripPlannerResults = await fetchViaTripPlanner(
-        apiKey, origin, destination, resolvedOriginId, resolvedDestId, selectedMode, resultLimit
+      departures = await fetchTripPlannerScheduleWindow(
+        apiKey,
+        origin,
+        destination,
+        resolvedOriginId,
+        resolvedDestId,
+        selectedMode,
+        resultLimit,
+        departures
       );
-      // Merge, deduplicate
-      const seen = new Set(departures.map(d => `${d.tripId}:${d.scheduledTime}`));
-      for (const dep of tripPlannerResults) {
-        if (!seen.has(`${dep.tripId}:${dep.scheduledTime}`)) {
-          departures.push(dep);
-        }
-      }
-      departures.sort((a, b) => new Date(a.scheduledTime).getTime() - new Date(b.scheduledTime).getTime());
     }
-
-    if (departures.length > 0) {
-      return {
-        statusCode: 200,
-        headers: CORS_HEADERS,
-        body: JSON.stringify(departures.slice(0, resultLimit)),
-      };
-    }
-
-    const dmResults = await fetchViaDepartureMonitor(
-      apiKey,
-      origin,
-      destination,
-      resolvedOriginId,
-      resolvedDestId,
-      selectedMode,
-      resultLimit
-    );
 
     return {
       statusCode: 200,
       headers: CORS_HEADERS,
-      body: JSON.stringify(dmResults.slice(0, resultLimit)),
+      body: JSON.stringify(dedupeAndSortDepartures(departures).slice(0, resultLimit)),
     };
   } catch (error) {
     const msg = error instanceof Error ? error.message : 'Unknown error';
@@ -410,12 +459,9 @@ async function fetchViaTripPlanner(
   // Build time offset if requesting next batch
   let timeParams = '';
   if (afterTime) {
-    const d = new Date(afterTime);
-    // Add 1 minute to avoid getting the same last result
-    d.setMinutes(d.getMinutes() + 1);
-    const dateStr = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
-    const timeStr = `${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}`;
-    timeParams = `&itdDate=${dateStr}&itdTime=${timeStr}`;
+    // Add 1 minute to avoid getting the same last result. TfNSW expects
+    // Sydney-local itdDate/itdTime values, not the Netlify server timezone.
+    timeParams = buildSydneyTripPlannerTimeParams(afterTime, 1);
   }
 
   const url =
@@ -576,11 +622,7 @@ async function fetchViaTripPlanner(
     });
   }
 
-  departures.sort((a, b) => {
-    return new Date(a.scheduledTime).getTime() - new Date(b.scheduledTime).getTime();
-  });
-
-  return departures;
+  return dedupeAndSortDepartures(departures);
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -699,9 +741,46 @@ async function fetchViaDepartureMonitor(
     });
   }
 
-  departures.sort((a, b) => {
-    return new Date(a.scheduledTime).getTime() - new Date(b.scheduledTime).getTime();
-  });
+  return dedupeAndSortDepartures(departures).slice(0, resultLimit);
+}
+
+
+async function fetchTripPlannerScheduleWindow(
+  apiKey: string,
+  origin: string,
+  destination: string,
+  originStopId: string,
+  destinationStopId: string,
+  selectedMode: RouteMode,
+  resultLimit: number,
+  existingDepartures: TrainDeparture[] = []
+): Promise<TrainDeparture[]> {
+  let departures = dedupeAndSortDepartures(existingDepartures);
+  let afterTime = latestDepartureTime(departures);
+
+  // Page through Trip Planner using explicit Sydney date/time parameters. This
+  // mirrors full trip-planning apps: Departure Monitor is great for live nearby
+  // services, while Trip Planner can return timetable services later today and
+  // tomorrow when asked for a future itdDate/itdTime.
+  for (let attempt = 0; attempt < 6 && departures.length < resultLimit; attempt++) {
+    const nextBatch = await fetchViaTripPlanner(
+      apiKey,
+      origin,
+      destination,
+      originStopId,
+      destinationStopId,
+      selectedMode,
+      resultLimit,
+      afterTime
+    );
+
+    const previousLength = departures.length;
+    departures = dedupeAndSortDepartures([...departures, ...nextBatch]);
+    afterTime = latestDepartureTime(departures);
+
+    if (!afterTime || !isWithinFutureScheduleWindow(afterTime)) break;
+    if (departures.length === previousLength) break;
+  }
 
   return departures.slice(0, resultLimit);
 }

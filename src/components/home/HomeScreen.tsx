@@ -137,7 +137,11 @@ export function HomeScreen() {
   };
 
   const handlePin = (card: RouteCardType) => {
-    updateRouteCard(card.id, { pinned: !card.pinned });
+    const pinned = !card.pinned;
+    updateRouteCard(card.id, {
+      pinned,
+      pinnedAt: pinned ? new Date().toISOString() : null,
+    });
     hapticLight();
     toast(card.pinned ? 'Unpinned' : 'Pinned to top', 'success', 2000);
   };

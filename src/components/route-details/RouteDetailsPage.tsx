@@ -8,6 +8,7 @@ import { LoadingSkeleton } from './LoadingSkeleton';
 import { InlineError } from './InlineError';
 import { useAppStore } from '@/store/appStore';
 import type { TrainDeparture } from '@/types';
+import { formatTransportTime24 } from '@/utils/timeUtils';
 import { getDepartureMode } from './transportMode';
 
 export function RouteDetailsPage() {
@@ -89,9 +90,7 @@ export function RouteDetailsPage() {
   }, [cardId, fetchLiveTrains, id]);
 
   function formatPrefillTime(isoTime: string): string {
-    const date = new Date(isoTime);
-    if (Number.isNaN(date.getTime())) return '';
-    return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+    return formatTransportTime24(isoTime);
   }
 
   const handleBellTap = (train: TrainDeparture) => {

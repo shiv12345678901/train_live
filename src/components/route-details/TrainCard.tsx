@@ -1,6 +1,7 @@
 import type { TrainDeparture, OccupancyLevel } from '@/types';
 import { getDepartureMode } from './transportMode';
 import { useCountdown, formatCountdown } from '@/hooks/useCountdown';
+import { formatTransportTime } from '@/utils/timeUtils';
 
 interface TrainCardProps {
   train: TrainDeparture;
@@ -9,8 +10,7 @@ interface TrainCardProps {
 }
 
 function formatTime(isoTime: string): string {
-  const date = new Date(isoTime);
-  return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
+  return formatTransportTime(isoTime, 'No time');
 }
 
 // ─── Occupancy Icon Component ────────────────────────────────────────
