@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { RouteCard, TrainDeparture, AlertSchedule, AlertPrefillData, AppSettings } from '@/types';
+import type { RouteCard, TrainDeparture, AlertSchedule, AlertPrefillData, AppSettings, TransportMode } from '@/types';
 import { fetchRouteCards, createRouteCard, deleteRouteCard as apiDeleteRouteCard, updateRouteOrder, updateRouteCard as apiUpdateRouteCard } from '@/api/routeApi';
 import { fetchLiveTrains as apiFetchLiveTrains } from '@/api/trainApi';
 import { fetchSchedules, createSchedule, updateSchedule, deleteSchedule as apiDeleteSchedule } from '@/api/scheduleApi';
@@ -84,10 +84,53 @@ function remapPendingRouteReferences(localId: string, remoteId: string): void {
   }
 }
 
+/**
+ * Infer transport mode from station/stop names.
+ * - "Station" in name → train (or metro if metro station)
+ * - "Wharf" → ferry
+ * - "Light Rail" → light_rail
+ * - Bus stop names (street addresses, "Stand", "opp", "nr") → bus
+ * - Metro stations → metro
+ */
+function inferModeFromStops(origin?: string, destination?: string): TransportMode {
+  const o = (origin || '').toLowerCase();
+  const d = (destination || '').toLowerCase();
+  const both = `${o} ${d}`;
+
+  // Ferry
+  if (o.includes('wharf') || d.includes('wharf')) return 'ferry';
+
+  // Light Rail
+  if (o.includes('light rail') || d.includes('light rail')) return 'light_rail';
+
+  // Metro — specific metro station names or "(Metro)" suffix
+  const metroKeywords = ['tallawong', 'rouse hill', 'castle hill', 'norwest', 'bella vista', 'cherrybrook', 'macquarie university', 'macquarie park', 'north ryde', '(metro)'];
+  if (metroKeywords.some(k => both.includes(k))) return 'metro';
+
+  // Bus — no "Station" in either name, or contains bus stop patterns
+  const busPatterns = ['stand', 'opp ', 'nr ', 'before ', 'after ', 'hwy', 'rd,', 'st,', 'ave,'];
+  const hasStation = o.includes('station') || d.includes('station');
+  const hasBusPattern = busPatterns.some(p => both.includes(p));
+
+  if (!hasStation && hasBusPattern) return 'bus';
+  if (!hasStation && !o.includes('wharf') && !d.includes('wharf')) return 'bus';
+
+  // Default: train
+  return 'train';
+}
+
+/**
+ * Migrate route cards — ensure data integrity on load.
+ */
+function migrateRouteCards(cards: RouteCard[]): RouteCard[] {
+  // No migration needed currently — all stop ID formats are valid
+  return cards;
+}
+
 export const useAppStore = create<AppState>()((set, get) => ({
   // ─── Route Cards (offline-first) ─────────────────────────────────
 
-  routeCards: getLocalRouteCards(),
+  routeCards: migrateRouteCards(getLocalRouteCards()),
 
   loadRouteCards: async () => {
     // Always load from localStorage first (instant)
@@ -250,7 +293,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
       const originStopId = card?.originStopId;
       const destinationStopId = card?.destinationStopId;
 
-      const trains = await apiFetchLiveTrains(routeId, origin, destination, originStopId, destinationStopId, limit, card?.mode ?? 'all');
+      const trains = await apiFetchLiveTrains(routeId, origin, destination, originStopId, destinationStopId, limit, card?.mode || inferModeFromStops(origin, destination));
       set((state) => {
         const updatedLiveTrains = { ...state.liveTrains, [routeId]: trains };
         setCachedLiveTrains(updatedLiveTrains);

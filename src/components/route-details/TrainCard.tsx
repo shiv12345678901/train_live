@@ -185,7 +185,7 @@ export function TrainCard({ train, onBellTap, onTap }: TrainCardProps) {
   const displayTime = train.estimatedTime || train.scheduledTime;
   const timeStr = displayTime ? formatTime(displayTime) : null;
   const scheduledStr = formatTime(train.scheduledTime);
-  const platform = formatPlatform(train.platform);
+  const platform = train.platform || '';
   const mode = getDepartureMode(train);
   const hasMultiLeg = train.legs && train.legs.length > 1;
 
@@ -205,10 +205,18 @@ export function TrainCard({ train, onBellTap, onTap }: TrainCardProps) {
     <div className={`train-card ${train.cancelled ? 'train-card--cancelled' : ''}`} onClick={onTap} role={onTap ? 'button' : undefined}>
       <div className="train-card-top">
         <div className="train-card-left">
-          <div className="train-card-platform-block">
-            <span className="train-card-platform-label">Platform</span>
-            <span className="train-card-platform-number">{platform}</span>
-          </div>
+          {platform ? (
+            <div className="train-card-platform-block">
+              <span className="train-card-platform-label">
+                {mode === 'bus' ? 'Stand' : mode === 'ferry' ? 'Wharf' : 'Plt'}
+              </span>
+              <span className="train-card-platform-number">{platform}</span>
+            </div>
+          ) : (
+            <div className="train-card-mode-icon">
+              <TransportIcon mode={mode} />
+            </div>
+          )}
           <div className="train-card-meta">
             <span className="train-card-route-line">
               <TransportIcon mode={mode} />

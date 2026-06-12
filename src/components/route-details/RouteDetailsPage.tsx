@@ -25,12 +25,12 @@ export function RouteDetailsPage() {
   const trains = id ? liveTrains[id] ?? [] : [];
   const isLoading = id ? liveTrainsLoading[id] ?? false : false;
   const error = id ? liveTrainsError[id] ?? null : null;
-  const [filterState, setFilterState] = useState({ routeFilter: 'all', serviceLimit: 5 });
+  const [routeFilter, setRouteFilter] = useState('all');
+  const [visibleCount, setVisibleCount] = useState(10);
   const [selectedTrain, setSelectedTrain] = useState<TrainDeparture | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [routesLoaded, setRoutesLoaded] = useState(routeCards.length > 0);
-  const { routeFilter, serviceLimit } = filterState;
-  const savedMode = card?.mode ?? 'train';
+  const savedMode = card?.mode || 'train';
 
   const uniqueTrains = trains.filter((train, index, list) => {
     const key = `${train.tripId}:${train.scheduledTime}:${train.platform}:${getDepartureMode(train)}`;
@@ -43,12 +43,13 @@ export function RouteDetailsPage() {
     ? uniqueTrains
     : uniqueTrains.filter(t => getDepartureMode(t) === savedMode);
 
-  const displayTrains = filteredTrains;
-  const hasMore = uniqueTrains.length >= serviceLimit;
+  // Client-side pagination — no re-fetch on "show more"
+  const displayTrains = filteredTrains.slice(0, visibleCount);
+  const hasMore = filteredTrains.length > visibleCount;
 
   const refreshLiveTrains = async () => {
     if (!id || !cardId) return;
-    await fetchLiveTrains(id, serviceLimit);
+    await fetchLiveTrains(id, 20); // Always fetch 20 trains
     setLastUpdated(new Date());
   };
 
@@ -57,23 +58,23 @@ export function RouteDetailsPage() {
     loadRouteCards().finally(() => {
       if (!cancelled) setRoutesLoaded(true);
     });
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [loadRouteCards]);
 
+  // Fetch trains once on mount with limit=20
   useEffect(() => {
     if (id && cardId) {
-      void fetchLiveTrains(id, serviceLimit).finally(() => setLastUpdated(new Date()));
+      void fetchLiveTrains(id, 20).finally(() => setLastUpdated(new Date()));
     }
-  }, [id, cardId, fetchLiveTrains, serviceLimit]);
+  }, [id, cardId, fetchLiveTrains]);
 
+  // Auto-refresh every 30 seconds
   useEffect(() => {
     if (!id || !cardId) return;
 
     const refreshIfVisible = () => {
       if (document.visibilityState === 'visible') {
-        void fetchLiveTrains(id, serviceLimit).finally(() => setLastUpdated(new Date()));
+        void fetchLiveTrains(id, 20).finally(() => setLastUpdated(new Date()));
       }
     };
 
@@ -84,7 +85,7 @@ export function RouteDetailsPage() {
       window.clearInterval(intervalId);
       document.removeEventListener('visibilitychange', refreshIfVisible);
     };
-  }, [cardId, fetchLiveTrains, id, serviceLimit]);
+  }, [cardId, fetchLiveTrains, id]);
 
   function formatPrefillTime(isoTime: string): string {
     const date = new Date(isoTime);
@@ -110,11 +111,12 @@ export function RouteDetailsPage() {
   };
 
   const handleFilter = (nextFilter: string) => {
-    setFilterState({ routeFilter: nextFilter, serviceLimit: 5 });
+    setRouteFilter(nextFilter);
+    setVisibleCount(10);
   };
 
   const handleLoadMore = () => {
-    setFilterState((prev) => ({ ...prev, serviceLimit: Math.min(prev.serviceLimit + 10, 50) }));
+    setVisibleCount((prev) => prev + 5);
   };
 
   const updatedLabel = lastUpdated
@@ -185,13 +187,13 @@ export function RouteDetailsPage() {
             onTap={() => setSelectedTrain(train)}
           />
         ))}
-        {!isLoading && !error && hasMore && serviceLimit < 50 && (
+        {!isLoading && !error && hasMore && (
           <button
             className="btn-secondary load-more-btn"
             onClick={handleLoadMore}
             type="button"
           >
-            Show more departures ({displayTrains.length} of {uniqueTrains.length}+)
+            Show more
           </button>
         )}
       </div>

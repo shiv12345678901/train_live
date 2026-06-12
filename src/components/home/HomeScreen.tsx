@@ -53,17 +53,19 @@ export function HomeScreen() {
     loadRouteCards().finally(() => setInitialLoading(false));
   }, [loadRouteCards]);
 
-  // Initial fetch for ALL cards — staggered to avoid rate limiting (Issue 4)
+  // Initial fetch for ALL cards — runs once after routes load, staggered
+  const hasFetchedRef = useRef(false);
   useEffect(() => {
+    if (routeCards.length === 0 || hasFetchedRef.current) return;
+    hasFetchedRef.current = true;
+
     let delay = 0;
     for (const card of routeCards) {
-      if (!liveTrains[card.id] && !liveTrainsLoading[card.id]) {
-        const cardId = card.id;
-        setTimeout(() => { void fetchLiveTrains(cardId); }, delay);
-        delay += 500; // 500ms between each request
-      }
+      const cardId = card.id;
+      setTimeout(() => { void fetchLiveTrains(cardId); }, delay);
+      delay += 600;
     }
-  }, [fetchLiveTrains, liveTrains, liveTrainsLoading, routeCards]);
+  }, [routeCards, fetchLiveTrains]);
 
   // Auto-refresh all cards every 30 seconds
   useEffect(() => {

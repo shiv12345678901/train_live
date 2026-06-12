@@ -65,24 +65,42 @@ function modeMatches(actual: TransportType, selected: RouteMode): boolean {
 
 // ─── Platform Extraction ─────────────────────────────────────────────
 
-function extractPlatform(locationOrOrigin: Record<string, unknown>): string {
-  // Method 1: properties.platform (Departure Monitor style)
-  const props = (locationOrOrigin.properties || {}) as Record<string, string>;
-  if (props.platform) return props.platform;
+function extractPlatform(locationOrOrigin: Record<string, unknown>, transportType?: TransportType): string {
+  // Buses and ferries don't have "platforms" — they have stands/wharves
+  const isBusOrFerry = transportType === 'bus' || transportType === 'ferry';
 
-  // Method 2: disassembledName contains "Platform X" (Trip Planner style)
+  const props = (locationOrOrigin.properties || {}) as Record<string, string>;
+
+  // Method 1: plannedPlatformName or platformName (cleanest — "Platform 2", "Stand A")
+  const platformName = props.plannedPlatformName || props.platformName || '';
+  if (platformName) {
+    // Extract just the number/letter from "Platform 2" or "Stand A"
+    const match = platformName.match(/(\d+|[A-Z])$/i);
+    return match ? match[1] : platformName;
+  }
+
+  // Method 2: stoppingPointPlanned (e.g., "Platform 2")
+  const stoppingPoint = props.stoppingPointPlanned || '';
+  if (stoppingPoint) {
+    const match = stoppingPoint.match(/(\d+|[A-Z])$/i);
+    return match ? match[1] : '';
+  }
+
+  // Method 3: disassembledName contains "Platform X" or "Stand X"
   const disassembled = (locationOrOrigin.disassembledName as string) || '';
   const platMatch = disassembled.match(/[Pp]latform\s*(\d+|[A-Z])/);
   if (platMatch) return platMatch[1];
+  const standMatch = disassembled.match(/[Ss]tand\s+([A-Z0-9])/);
+  if (standMatch) return standMatch[1];
 
-  // Method 3: trailing number/letter in disassembledName
-  const trailingMatch = disassembled.match(/(\d+|[A-Z])$/);
-  if (trailingMatch) return trailingMatch[1];
+  // Method 4: For buses, don't extract random trailing numbers
+  if (isBusOrFerry) return '';
 
-  // Method 4: Check parent properties
-  const parent = (locationOrOrigin.parent || {}) as Record<string, unknown>;
-  const parentProps = (parent.properties || {}) as Record<string, string>;
-  if (parentProps.platform) return parentProps.platform;
+  // Method 5: area field (sometimes just "2" for platform 2)
+  const area = props.area || '';
+  if (area && /^\d+$/.test(area) && Number(area) > 0 && Number(area) <= 30) {
+    return area;
+  }
 
   return '';
 }
@@ -161,11 +179,11 @@ const handler: Handler = async (event) => {
   const userId = event.headers['x-user-id'] || 'anonymous';
   const rateLimitKey = `${userId}:${clientIp}`;
   if (isRateLimited(rateLimitKey)) {
-    return { statusCode: 429, headers: { ...getRateLimitHeaders(rateLimitKey), 'Content-Type': 'application/json' }, body: JSON.stringify({ error: 'Too many requests' }) };
+    return { statusCode: 429, headers: { ...CORS_HEADERS, ...getRateLimitHeaders(rateLimitKey) }, body: JSON.stringify({ error: 'Too many requests' }) };
   }
 
   const routeId = event.queryStringParameters?.id;
-  if (!routeId) return { statusCode: 400, body: JSON.stringify({ error: 'id is required' }) };
+  if (!routeId) return { statusCode: 400, headers: CORS_HEADERS, body: JSON.stringify({ error: 'id is required' }) };
 
   try {
     const origin = event.queryStringParameters?.origin || '';
@@ -177,39 +195,77 @@ const handler: Handler = async (event) => {
     const resultLimit = Math.min(Math.max(Math.round(requestedLimit) || 5, 1), 50);
 
     if (!origin || !destination) {
-      return { statusCode: 400, body: JSON.stringify({ error: 'origin and destination are required' }) };
+      return { statusCode: 400, headers: CORS_HEADERS, body: JSON.stringify({ error: 'origin and destination are required' }) };
     }
 
     const apiKey = process.env.TFN_API_KEY;
-    if (!apiKey) return { statusCode: 503, body: JSON.stringify({ error: 'TFN_API_KEY not configured' }) };
+    if (!apiKey) return { statusCode: 503, headers: CORS_HEADERS, body: JSON.stringify({ error: 'TFN_API_KEY not configured' }) };
 
     // ─── PRIMARY: Trip Planner (best for A→B routing) ──────────────
-    // IMPORTANT: Always use station NAMES with type=any for Trip Planner.
-    // The Trip Planner handles name resolution far better than raw stop IDs.
-    // Only use stopId if it came from the Stop Finder API (7-8 digit EFA format).
-    const useOriginId = originStopId && originStopId.length >= 7;
-    const useDestId = destinationStopId && destinationStopId.length >= 7;
+    // The Trip Planner works with stop IDs (any length) via type=stop.
+    // Station names with type=any cause "multiple matches" errors.
+    // Strategy: use stopId if available, otherwise resolve via Stop Finder first.
+
+    let resolvedOriginId = originStopId;
+    let resolvedDestId = destinationStopId;
+
+    // If no stop IDs, resolve via Stop Finder
+    if (!resolvedOriginId) {
+      resolvedOriginId = await resolveStopId(apiKey, origin);
+    }
+    if (!resolvedDestId) {
+      resolvedDestId = await resolveStopId(apiKey, destination);
+    }
 
     const departures = await fetchViaTripPlanner(
       apiKey, origin, destination,
-      useOriginId ? originStopId : '',
-      useDestId ? destinationStopId : '',
+      resolvedOriginId,
+      resolvedDestId,
       selectedMode, resultLimit
     );
 
     if (departures.length > 0) {
-      return { statusCode: 200, body: JSON.stringify(departures.slice(0, resultLimit)) };
+      return { statusCode: 200, headers: CORS_HEADERS, body: JSON.stringify(departures.slice(0, resultLimit)) };
     }
 
     // ─── FALLBACK: Departure Monitor (for when Trip Planner returns nothing) ─
     const dmResults = await fetchViaDepartureMonitor(apiKey, origin, destination, originStopId, destinationStopId, selectedMode, resultLimit);
-    return { statusCode: 200, body: JSON.stringify(dmResults.slice(0, resultLimit)) };
+    return { statusCode: 200, headers: CORS_HEADERS, body: JSON.stringify(dmResults.slice(0, resultLimit)) };
 
   } catch (error) {
     const msg = error instanceof Error ? error.message : 'Unknown error';
-    return { statusCode: 500, body: JSON.stringify({ error: 'Failed to fetch trains', detail: msg }) };
+    return { statusCode: 500, headers: CORS_HEADERS, body: JSON.stringify({ error: 'Failed to fetch trains', detail: msg }) };
   }
 };
+
+// ─────────────────────────────────────────────────────────────────────
+// STOP ID RESOLUTION — Resolves station name → stop ID via Stop Finder
+// ─────────────────────────────────────────────────────────────────────
+
+async function resolveStopId(apiKey: string, stationName: string): Promise<string> {
+  try {
+    const sfUrl = `https://api.transport.nsw.gov.au/v1/tp/stop_finder?outputFormat=rapidJSON&type_sf=any&name_sf=${encodeURIComponent(stationName)}&coordOutputFormat=EPSG%3A4326&TfNSWSF=true&version=10.2.1.42`;
+    const res = await fetchWithTimeout(sfUrl, { headers: { 'Authorization': `apikey ${apiKey}` } }, 8000);
+    if (!res.ok) return '';
+
+    const data = (await res.json()) as Record<string, unknown>;
+    const locations = (data?.locations || []) as Array<Record<string, unknown>>;
+
+    // Find the first result that is a stop with isGlobalId=true
+    for (const loc of locations) {
+      if (loc.isGlobalId && loc.type === 'stop') {
+        return String(loc.id || '');
+      }
+    }
+    // Fallback: first stop-type result with any ID
+    for (const loc of locations) {
+      if (loc.type === 'stop' && loc.id) {
+        return String(loc.id);
+      }
+    }
+  } catch { /* continue without ID */ }
+  return '';
+}
 
 // ─────────────────────────────────────────────────────────────────────
 // TRIP PLANNER — Primary source for A→B journey results
@@ -224,21 +280,23 @@ async function fetchViaTripPlanner(
   selectedMode: RouteMode,
   resultLimit: number
 ): Promise<TrainDeparture[]> {
-  // Use stop ID only if it's a proper 7-8 digit EFA ID.
-  // Otherwise use station name with type=any (Trip Planner resolves it perfectly).
-  const originType = (originStopId && originStopId.length >= 7) ? 'stop' : 'any';
-  const originName = (originStopId && originStopId.length >= 7) ? originStopId : origin;
-  const destType = (destinationStopId && destinationStopId.length >= 7) ? 'stop' : 'any';
-  const destName = (destinationStopId && destinationStopId.length >= 7) ? destinationStopId : destination;
-  const tripCount = Math.min(Math.max(resultLimit + 3, 8), 20);
+  // Use stop ID with type=stop (reliable). Fall back to name with type=any (unreliable).
+  const originType = originStopId ? 'stop' : 'any';
+  const originName = originStopId || origin;
+  const destType = destinationStopId ? 'stop' : 'any';
+  const destName = destinationStopId || destination;
+  const tripCount = Math.min(Math.max(resultLimit * 2, 12), 30);
 
   const url = `https://api.transport.nsw.gov.au/v1/tp/trip?outputFormat=rapidJSON&coordOutputFormat=EPSG%3A4326&depArrMacro=dep&type_origin=${originType}&name_origin=${encodeURIComponent(originName)}&type_destination=${destType}&name_destination=${encodeURIComponent(destName)}&calcNumberOfTrips=${tripCount}&TfNSWTR=true&version=10.2.1.42`;
 
-  const res = await fetchWithTimeout(url, { headers: { 'Authorization': `apikey ${apiKey}` } }, 12000);
+  const res = await fetchWithTimeout(url, { headers: { 'Authorization': `apikey ${apiKey}` } }, 15000);
   if (!res.ok) return [];
 
   const data = (await res.json()) as Record<string, unknown>;
   const journeys = (data?.journeys || []) as Array<Record<string, unknown>>;
+
+  if (journeys.length === 0) return [];
+
   const departures: TrainDeparture[] = [];
   const seen = new Set<string>();
 
@@ -263,9 +321,6 @@ async function fetchViaTripPlanner(
     const estimatedTime = (originInfo.departureTimeEstimated as string) || undefined;
     if (!scheduledTime) continue;
 
-    // Platform extraction (Fix #2)
-    const platform = extractPlatform(originInfo);
-
     const line = (transportation.disassembledName || transportation.number || '') as string;
     const tripId = (transportation.id as string) || `trip-${departures.length}`;
     const isCancelled = firstLeg.isCancelled === true;
@@ -274,8 +329,14 @@ async function fetchViaTripPlanner(
     const productName = (product.name as string) || '';
     const transportType = detectTransportType(productClass, productName, line);
 
-    // Mode filter — for multi-leg, only filter if the PRIMARY leg doesn't match
-    if (transitLegs.length === 1 && !modeMatches(transportType, selectedMode)) continue;
+    // Extract platform AFTER knowing transport type (buses don't have platforms)
+    const platform = extractPlatform(originInfo, transportType);
+
+    // Mode filter — STRICT: if route is set to 'train', only show trains. 
+    // If 'bus', only show buses. No mismatched modes.
+    if (selectedMode !== 'all' && !modeMatches(transportType, selectedMode)) {
+      continue;
+    }
 
     const dedupeKey = `${tripId}:${scheduledTime}`;
     if (seen.has(dedupeKey)) continue;
@@ -359,41 +420,19 @@ async function fetchViaDepartureMonitor(
   selectedMode: RouteMode,
   resultLimit: number
 ): Promise<TrainDeparture[]> {
-  // Only use stopId for DM if it's a proper 7-8 digit EFA ID.
-  // The old 6-digit IDs (200060 etc.) cause wrong platform/schedule data.
-  let dmName = '';
-  let dmType = 'any';
-
-  if (originStopId && originStopId.length >= 7) {
-    dmName = originStopId;
-    dmType = 'stop';
-  }
+  // Use the stop ID directly — it was already resolved by the main handler
+  let dmName = originStopId || '';
+  let dmType = originStopId ? 'stop' : 'any';
 
   if (!dmName) {
-    // Try stop finder to get a proper EFA ID
-    try {
-      const sfUrl = `https://api.transport.nsw.gov.au/v1/tp/stop_finder?outputFormat=rapidJSON&type_sf=stop&name_sf=${encodeURIComponent(origin)}&coordOutputFormat=EPSG%3A4326&TfNSWSF=true&version=10.2.1.42`;
-      const sfRes = await fetchWithTimeout(sfUrl, { headers: { 'Authorization': `apikey ${apiKey}` } }, 6000);
-      if (sfRes.ok) {
-        const sfData = (await sfRes.json()) as Record<string, unknown>;
-        const locs = (sfData?.locations || []) as Array<Record<string, unknown>>;
-        for (const loc of locs) {
-          const locId = String(loc.id || '');
-          // Only accept proper 7+ digit EFA IDs
-          if (loc.isGlobalId && locId.length >= 7 && (loc.type === 'stop' || loc.type === 'poi')) {
-            dmName = locId;
-            dmType = 'stop';
-            break;
-          }
-        }
-      }
-    } catch { /* continue */ }
-  }
-
-  // If we still don't have a proper ID, use station name with type=any
-  if (!dmName) {
-    dmName = origin;
-    dmType = 'any';
+    // Last resort: try to resolve
+    dmName = await resolveStopId(apiKey, origin);
+    if (dmName) {
+      dmType = 'stop';
+    } else {
+      dmName = origin;
+      dmType = 'any';
+    }
   }
 
   const dmUrl = `https://api.transport.nsw.gov.au/v1/tp/departure_mon?outputFormat=rapidJSON&coordOutputFormat=EPSG%3A4326&mode=direct&type_dm=${dmType}&name_dm=${encodeURIComponent(dmName)}&departureMonitorMacro=true&TfNSWDM=true&version=10.2.1.42&limit=50`;
@@ -427,7 +466,7 @@ async function fetchViaDepartureMonitor(
     if (!scheduledTime) continue;
 
     const location = (ev.location || {}) as Record<string, unknown>;
-    const platform = extractPlatform(location);
+    const platform = extractPlatform(location, transportType);
     const isCancelled = ev.isCancelled === true;
     const tripId = (transportation.id as string) || '';
 

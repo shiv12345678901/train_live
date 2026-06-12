@@ -11,72 +11,15 @@ interface StopInfo {
   isPassed?: boolean;
 }
 
-function idsMatch(value: unknown, targetId: string): boolean {
-  return typeof value === 'string' && value === targetId;
-}
-
-function stopMatches(stop: Record<string, unknown>, targetName: string, targetStopId?: string): boolean {
-  const parent = (stop.parent || {}) as Record<string, unknown>;
-  if (targetStopId && (idsMatch(stop.id, targetStopId) || idsMatch(parent.id, targetStopId))) {
-    return true;
-  }
-
-  const target = targetName.toLowerCase().replace(/\s*station\s*/gi, '').trim();
-  const stopName = String(stop.name || '').toLowerCase().replace(/\s*station\s*/gi, '').trim();
-  const parentName = String(parent.name || '').toLowerCase().replace(/\s*station\s*/gi, '').trim();
-  return Boolean(target && (stopName.includes(target) || parentName.includes(target)));
-}
-
-function eventServesDestination(
-  stopEvent: Record<string, unknown>,
-  destination: string,
-  destinationStopId?: string
-): boolean {
-  const onwardLocations = (stopEvent.onwardLocations || []) as Array<Record<string, unknown>>;
-  if (onwardLocations.some((loc) => stopMatches(loc, destination, destinationStopId))) {
-    return true;
-  }
-
-  const transportation = (stopEvent.transportation || {}) as Record<string, unknown>;
-  const transportDest = (transportation.destination || {}) as Record<string, unknown>;
-  return stopMatches(transportDest, destination, destinationStopId);
-}
-
-function eventMatchScore(
-  stopEvent: Record<string, unknown>,
-  scheduledTime: string,
-  tripId: string,
-  platform: string,
-  route: string
-): number {
-  const transportation = (stopEvent.transportation || {}) as Record<string, unknown>;
-  const location = (stopEvent.location || {}) as Record<string, unknown>;
-  const locationProps = (location.properties || {}) as Record<string, string>;
-
-  let score = 0;
-  const eventTripId = String(transportation.id || '');
-  if (tripId && eventTripId === tripId) score += 100;
-
-  const eventRoute = String(transportation.disassembledName || transportation.number || '');
-  if (route && eventRoute === route) score += 20;
-
-  const eventPlatform = locationProps.platform || '';
-  if (platform && eventPlatform && eventPlatform === platform) score += 15;
-
-  const depPlanned = String(stopEvent.departureTimePlanned || '');
-  if (scheduledTime && depPlanned) {
-    const diff = Math.abs(new Date(depPlanned).getTime() - new Date(scheduledTime).getTime());
-    if (diff < 120000) score += 40;
-    else if (diff < 600000) score += 10;
-  }
-
-  return score;
-}
-
+/**
+ * Trip Stops endpoint — returns the full stop sequence for a specific service.
+ * Uses the Trip Planner API with origin/destination to get the stopSequence
+ * from the matching journey leg.
+ */
 const handler: Handler = async (event) => {
   const corsResp = handleCors(event.httpMethod); if (corsResp) return corsResp;
   if (event.httpMethod !== 'GET') {
-    return { statusCode: 405, body: JSON.stringify({ error: 'Method not allowed' }) };
+    return { statusCode: 405, headers: CORS_HEADERS, body: JSON.stringify({ error: 'Method not allowed' }) };
   }
 
   const origin = event.queryStringParameters?.origin || '';
@@ -85,150 +28,200 @@ const handler: Handler = async (event) => {
   const destinationStopId = event.queryStringParameters?.destinationStopId || '';
   const scheduledTime = event.queryStringParameters?.scheduledTime || '';
   const tripId = event.queryStringParameters?.tripId || '';
-  const platform = event.queryStringParameters?.platform || '';
   const route = event.queryStringParameters?.route || '';
 
-  if (!origin) {
-    return { statusCode: 400, body: JSON.stringify({ error: 'origin required' }) };
+  if (!origin || !destination) {
+    return { statusCode: 400, headers: CORS_HEADERS, body: JSON.stringify({ error: 'origin and destination required' }) };
   }
 
   const apiKey = process.env.TFN_API_KEY;
   if (!apiKey) {
-    return { statusCode: 200, body: JSON.stringify({ stops: [] }) };
+    return { statusCode: 200, headers: CORS_HEADERS, body: JSON.stringify({ stops: [] }) };
   }
 
   try {
-    // Resolve stop ID if not provided
-    let stopId = originStopId;
-    if (!stopId) {
-      const sfUrl = `https://api.transport.nsw.gov.au/v1/tp/stop_finder?outputFormat=rapidJSON&type_sf=any&name_sf=${encodeURIComponent(origin)}&TfNSWSF=true&version=10.2.1.42`;
-      const sfRes = await fetchWithTimeout(sfUrl, { headers: { 'Authorization': `apikey ${apiKey}` } });
-      if (sfRes.ok) {
-        const sfData = (await sfRes.json()) as Record<string, unknown>;
-        const locations = (sfData?.locations || []) as Array<Record<string, unknown>>;
-        for (const loc of locations) {
-          if (loc.isGlobalId && loc.type === 'stop') {
-            stopId = loc.id as string;
-            break;
-          }
+    // Resolve origin stop ID if not provided
+    let resolvedOriginId = originStopId;
+    let resolvedDestId = destinationStopId;
+
+    if (!resolvedOriginId) {
+      resolvedOriginId = await resolveStop(apiKey, origin);
+    }
+    if (!resolvedDestId) {
+      resolvedDestId = await resolveStop(apiKey, destination);
+    }
+
+    // Use Trip Planner to get the journey with stopSequence
+    const originType = resolvedOriginId ? 'stop' : 'any';
+    const originName = resolvedOriginId || origin;
+    const destType = resolvedDestId ? 'stop' : 'any';
+    const destName = resolvedDestId || destination;
+
+    // Request specific departure time if available
+    let timeParams = '';
+    if (scheduledTime) {
+      const d = new Date(scheduledTime);
+      const dateStr = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+      const timeStr = `${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}`;
+      timeParams = `&itdDate=${dateStr}&itdTime=${timeStr}`;
+    }
+
+    const url = `https://api.transport.nsw.gov.au/v1/tp/trip?outputFormat=rapidJSON&coordOutputFormat=EPSG%3A4326&depArrMacro=dep&type_origin=${originType}&name_origin=${encodeURIComponent(originName)}&type_destination=${destType}&name_destination=${encodeURIComponent(destName)}&calcNumberOfTrips=5&TfNSWTR=true&version=10.2.1.42${timeParams}`;
+
+    const res = await fetchWithTimeout(url, { headers: { 'Authorization': `apikey ${apiKey}` } }, 15000);
+    if (!res.ok) {
+      return { statusCode: 200, headers: CORS_HEADERS, body: JSON.stringify({ stops: [] }) };
+    }
+
+    const data = (await res.json()) as Record<string, unknown>;
+    const journeys = (data?.journeys || []) as Array<Record<string, unknown>>;
+
+    if (journeys.length === 0) {
+      return { statusCode: 200, headers: CORS_HEADERS, body: JSON.stringify({ stops: [] }) };
+    }
+
+    // Find the best matching journey/leg
+    let bestLeg: Record<string, unknown> | null = null;
+    let bestScore = -1;
+
+    for (const journey of journeys) {
+      const legs = (journey.legs || []) as Array<Record<string, unknown>>;
+      for (const leg of legs) {
+        const t = (leg.transportation || {}) as Record<string, unknown>;
+        const p = (t.product || {}) as Record<string, unknown>;
+        if (Number(p.class) === 100) continue; // skip walking
+
+        let score = 0;
+        const legTripId = String(t.id || '');
+        const legRoute = String(t.disassembledName || t.number || '');
+        const legOrigin = (leg.origin || {}) as Record<string, unknown>;
+        const legDepTime = String(legOrigin.departureTimePlanned || '');
+
+        if (tripId && legTripId === tripId) score += 100;
+        if (route && legRoute === route) score += 30;
+        if (scheduledTime && legDepTime) {
+          const diff = Math.abs(new Date(legDepTime).getTime() - new Date(scheduledTime).getTime());
+          if (diff < 60000) score += 50;
+          else if (diff < 300000) score += 20;
+          else if (diff < 900000) score += 5;
+        }
+
+        if (score > bestScore) {
+          bestScore = score;
+          bestLeg = leg;
         }
       }
     }
 
-    if (!stopId) {
-      return { statusCode: 200, body: JSON.stringify({ stops: [], error: 'Could not resolve stop' }) };
-    }
-
-    // Use departure monitor with stopSequence included
-    // The key parameter is &TfNSWDM=true which returns previous/onward calls
-    const dmUrl = `https://api.transport.nsw.gov.au/v1/tp/departure_mon?outputFormat=rapidJSON&coordOutputFormat=EPSG%3A4326&mode=direct&type_dm=stop&name_dm=${stopId}&departureMonitorMacro=true&TfNSWDM=true&version=10.2.1.42`;
-
-    const dmRes = await fetchWithTimeout(dmUrl, { headers: { 'Authorization': `apikey ${apiKey}` } });
-    if (!dmRes.ok) {
-      return { statusCode: 200, body: JSON.stringify({ stops: [] }) };
-    }
-
-    const dmData = (await dmRes.json()) as Record<string, unknown>;
-    const stopEvents = (dmData?.stopEvents || []) as Array<Record<string, unknown>>;
-
-    let matchedEvent: Record<string, unknown> | null = null;
-    let bestScore = 0;
-
-    for (const evt of stopEvents) {
-      if (destination && !eventServesDestination(evt, destination, destinationStopId)) continue;
-      const score = eventMatchScore(evt, scheduledTime, tripId, platform, route);
-      if (score > bestScore) {
-        bestScore = score;
-        matchedEvent = evt;
+    // Fallback: use first transit leg of first journey
+    if (!bestLeg) {
+      for (const journey of journeys) {
+        const legs = (journey.legs || []) as Array<Record<string, unknown>>;
+        for (const leg of legs) {
+          const t = (leg.transportation || {}) as Record<string, unknown>;
+          const p = (t.product || {}) as Record<string, unknown>;
+          if (Number(p.class) !== 100) {
+            bestLeg = leg;
+            break;
+          }
+        }
+        if (bestLeg) break;
       }
     }
 
-    if (!matchedEvent && !scheduledTime && stopEvents.length > 0) {
-      matchedEvent = destination
-        ? stopEvents.find((evt) => eventServesDestination(evt, destination, destinationStopId)) || null
-        : stopEvents[0];
+    if (!bestLeg) {
+      return { statusCode: 200, headers: CORS_HEADERS, body: JSON.stringify({ stops: [] }) };
     }
 
-    if (!matchedEvent) {
-      return { statusCode: 200, body: JSON.stringify({ stops: [] }) };
-    }
-
-    const transportation = (matchedEvent.transportation || {}) as Record<string, unknown>;
-    const line = (transportation.disassembledName || transportation.number || '') as string;
-    const destInfo = (transportation.destination || {}) as Record<string, string>;
-
-    // Get previous and onward stops from the event
-    const previousLocations = (matchedEvent.previousLocations || []) as Array<Record<string, unknown>>;
-    const onwardLocations = (matchedEvent.onwardLocations || []) as Array<Record<string, unknown>>;
+    // Extract stop sequence from the leg
+    const stopSequence = (bestLeg.stopSequence || []) as Array<Record<string, unknown>>;
+    const transportation = (bestLeg.transportation || {}) as Record<string, unknown>;
+    const transportDest = (transportation.destination || {}) as Record<string, unknown>;
+    const lineName = String(transportation.disassembledName || transportation.number || '');
 
     const now = new Date();
     const stops: StopInfo[] = [];
 
-    // Previous stops (already passed)
-    for (const loc of previousLocations) {
-      const parent = (loc.parent || {}) as Record<string, string>;
-      const name = parent.name || (loc.name as string) || '';
-      const arrTime = (loc.arrivalTimePlanned as string) || (loc.departureTimePlanned as string) || undefined;
-      const depTime = (loc.departureTimePlanned as string) || undefined;
+    for (const stop of stopSequence) {
+      const parent = (stop.parent || {}) as Record<string, unknown>;
+      const name = String(parent.name || stop.name || '');
+      const arrTime = (stop.arrivalTimePlanned as string) || (stop.arrivalTimeEstimated as string) || undefined;
+      const depTime = (stop.departureTimePlanned as string) || (stop.departureTimeEstimated as string) || undefined;
+
+      // Skip stops without any time — train doesn't stop here (express)
+      if (!arrTime && !depTime) continue;
+
+      const props = (stop.properties || {}) as Record<string, string>;
       
+      // Extract clean platform number (not coded IDs like "ROK2")
+      let platform = '';
+      const platformName = props.plannedPlatformName || props.platformName || '';
+      if (platformName) {
+        const m = platformName.match(/(\d+|[A-Z])$/i);
+        platform = m ? m[1] : '';
+      } else if (props.stoppingPointPlanned) {
+        const m = props.stoppingPointPlanned.match(/(\d+|[A-Z])$/i);
+        platform = m ? m[1] : '';
+      } else {
+        // Try from disassembledName
+        const dis = String(stop.disassembledName || '');
+        const m = dis.match(/[Pp]latform\s*(\d+|[A-Z])/);
+        platform = m ? m[1] : '';
+      }
+
+      // Determine if this stop is passed or current
+      const relevantTime = depTime || arrTime;
+      const stopTime = relevantTime ? new Date(relevantTime).getTime() : 0;
+      const isPassed = stopTime > 0 && stopTime < now.getTime();
+
+      // Check if this is approximately the "current" stop (closest future stop)
+      const isCurrent = stopTime > 0 &&
+        stopTime >= now.getTime() &&
+        stopTime < now.getTime() + 120000; // within 2 min of now
+
       stops.push({
         name,
         arrivalTime: arrTime,
         departureTime: depTime,
-        isPassed: true,
-        isCurrent: false,
+        platform: platform || undefined,
+        isPassed,
+        isCurrent,
       });
     }
 
-    // Current stop (the origin)
-    const currentLocation = (matchedEvent.location || {}) as Record<string, unknown>;
-    const currentParent = (currentLocation.parent || {}) as Record<string, string>;
-    const currentName = currentParent.name || (currentLocation.name as string) || origin;
-    const locationProps = (currentLocation.properties || {}) as Record<string, string>;
-    const currentPlatform = locationProps.platform || '';
-
-    stops.push({
-      name: currentName,
-      departureTime: (matchedEvent.departureTimePlanned as string) || undefined,
-      platform: currentPlatform,
-      isPassed: false,
-      isCurrent: true,
-    });
-
-    // Onward stops (future)
-    for (const loc of onwardLocations) {
-      const parent = (loc.parent || {}) as Record<string, string>;
-      const name = parent.name || (loc.name as string) || '';
-      const arrTime = (loc.arrivalTimePlanned as string) || (loc.departureTimePlanned as string) || undefined;
-      const depTime = (loc.departureTimePlanned as string) || undefined;
-      const isPassed = arrTime ? new Date(arrTime).getTime() < now.getTime() : false;
-      
-      stops.push({
-        name,
-        arrivalTime: arrTime,
-        departureTime: depTime,
-        isPassed,
-        isCurrent: false,
-      });
-
-      if (destination && stopMatches(loc, destination, destinationStopId)) {
-        break;
-      }
+    // If no stop was marked current, mark the first future stop
+    if (!stops.some(s => s.isCurrent)) {
+      const firstFuture = stops.find(s => !s.isPassed);
+      if (firstFuture) firstFuture.isCurrent = true;
     }
 
     return {
       statusCode: 200,
-      headers: { 'Content-Type': 'application/json' },
+      headers: CORS_HEADERS,
       body: JSON.stringify({
-        route: line,
-        destination: destInfo.name || destination,
+        route: lineName,
+        destination: String(transportDest.name || destination),
         stops,
       }),
     };
   } catch (error) {
-    const msg = error instanceof Error ? error.message : 'Unknown';
-    return { statusCode: 500, body: JSON.stringify({ error: 'Failed', detail: msg }) };
+    const msg = error instanceof Error ? error.message : 'Unknown error';
+    return { statusCode: 500, headers: CORS_HEADERS, body: JSON.stringify({ error: 'Failed to get trip stops', detail: msg }) };
   }
 };
+
+async function resolveStop(apiKey: string, name: string): Promise<string> {
+  try {
+    const url = `https://api.transport.nsw.gov.au/v1/tp/stop_finder?outputFormat=rapidJSON&type_sf=any&name_sf=${encodeURIComponent(name)}&TfNSWSF=true&version=10.2.1.42`;
+    const res = await fetchWithTimeout(url, { headers: { 'Authorization': `apikey ${apiKey}` } }, 8000);
+    if (!res.ok) return '';
+    const data = (await res.json()) as Record<string, unknown>;
+    const locs = (data?.locations || []) as Array<Record<string, unknown>>;
+    for (const loc of locs) {
+      if (loc.isGlobalId && loc.type === 'stop') return String(loc.id || '');
+    }
+  } catch { /* ignore */ }
+  return '';
+}
 
 export { handler };

@@ -2138,233 +2138,7 @@ body {
 
 /* ─── Train Detail Sheet ────────────────────────────────────────────── */
 
-.train-detail-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 1000;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.35);
-  backdrop-filter: blur(2px);
-  animation: fade-in 0.2s ease;
-}
-
-@keyframes fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-.train-detail-sheet {
-  position: relative;
-  width: 100%;
-  max-width: 480px;
-  max-height: 80vh;
-  background: var(--bg);
-  border-radius: 20px 20px 0 0;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  animation: sheet-up 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-@keyframes sheet-up {
-  from { transform: translateY(100%); }
-  to { transform: translateY(0); }
-}
-
-.train-detail-header {
-  padding: 12px 20px 16px;
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
-
-.train-detail-handle {
-  width: 36px;
-  height: 4px;
-  background: var(--border);
-  border-radius: 2px;
-  margin: 0 auto 12px;
-}
-
-.train-detail-title-row {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-}
-
-.train-detail-title {
-  font-size: 22px;
-  font-weight: 700;
-  color: var(--text);
-  letter-spacing: -0.03em;
-  margin: 0;
-}
-
-.train-detail-subtitle {
-  font-size: 14px;
-  font-weight: 400;
-  color: var(--muted);
-  margin: 2px 0 0;
-}
-
-.train-detail-close {
-  width: 32px;
-  height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: none;
-  background: var(--panel);
-  border-radius: 50%;
-  cursor: pointer;
-  color: var(--text);
-}
-
-/* Stop list */
-.train-detail-stops {
-  flex: 1;
-  overflow-y: auto;
-  padding: 16px 20px 32px;
-}
-
-.train-detail-loading {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 24px 0;
-  color: var(--muted);
-  font-size: 14px;
-}
-
-.train-detail-loading-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--border);
-  animation: pulse 1s infinite ease-in-out;
-}
-
-.train-detail-empty {
-  color: var(--muted);
-  font-size: 14px;
-  text-align: center;
-  padding: 32px 0;
-}
-
-.train-detail-stop-list {
-  display: flex;
-  flex-direction: column;
-}
-
-.train-detail-stop {
-  display: flex;
-  align-items: flex-start;
-  gap: 14px;
-  min-height: 44px;
-}
-
-.train-detail-stop.passed {
-  opacity: 0.4;
-}
-
-.train-detail-stop.current {
-  opacity: 1;
-}
-
-/* Timeline */
-.train-detail-timeline {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  width: 16px;
-  flex-shrink: 0;
-  padding-top: 4px;
-}
-
-.train-detail-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  border: 2px solid var(--border);
-  background: var(--bg);
-  flex-shrink: 0;
-  z-index: 1;
-}
-
-.train-detail-dot.passed {
-  background: var(--border);
-  border-color: var(--border);
-}
-
-.train-detail-dot.current {
-  background: var(--success);
-  border-color: var(--success);
-  box-shadow: 0 0 0 4px rgba(11, 122, 59, 0.15);
-  animation: dot-pulse 2s infinite ease-in-out;
-}
-
-@keyframes dot-pulse {
-  0%, 100% { box-shadow: 0 0 0 4px rgba(11, 122, 59, 0.15); }
-  50% { box-shadow: 0 0 0 8px rgba(11, 122, 59, 0); }
-}
-
-.train-detail-line {
-  width: 2px;
-  flex: 1;
-  min-height: 24px;
-  background: var(--border);
-  margin: 2px 0;
-}
-
-.train-detail-line.passed {
-  background: var(--muted);
-}
-
-/* Stop info */
-.train-detail-stop-info {
-  flex: 1;
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  padding: 2px 0 12px;
-  min-width: 0;
-}
-
-.train-detail-stop-name {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.train-detail-stop.current .train-detail-stop-name {
-  font-weight: 700;
-  color: var(--success);
-}
-
-.train-detail-stop-platform {
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--muted);
-  flex-shrink: 0;
-}
-
-.train-detail-stop-time {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--muted);
-  flex-shrink: 0;
-  min-width: 70px;
-  text-align: right;
-}
-
-.train-detail-stop.current .train-detail-stop-time {
-  color: var(--success);
-  font-weight: 600;
-}
+/* Old train detail sheet styles removed — using Feature 15 definitions below */
 
 
 /* ─── Page Transitions (Feature 11) ─────────────────────────────────── */
@@ -2573,8 +2347,9 @@ body {
   position: fixed;
   inset: 0;
   z-index: 500;
-  background: rgba(0, 0, 0, 0.4);
-  backdrop-filter: blur(4px);
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
   display: flex;
   align-items: flex-end;
   justify-content: center;
@@ -3090,4 +2865,60 @@ body {
 .quick-glance-no-data {
   font-size: 14px;
   color: var(--muted);
+}
+
+
+/* ─── Train Detail Sheet Enhancements ────────────────────────────────── */
+
+.train-detail-stop.highlighted {
+  background: #f8f9fa;
+  margin: 0 -8px;
+  padding: 10px 8px;
+  border-radius: 8px;
+}
+
+.train-detail-stop-name.bold {
+  font-weight: 800;
+  color: var(--text);
+}
+
+.train-detail-stop-time.bold {
+  font-weight: 800;
+  color: var(--text);
+}
+
+.train-detail-badge {
+  display: inline-flex;
+  margin-left: 8px;
+  padding: 1px 6px;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-radius: var(--radius-full);
+  background: var(--text);
+  color: var(--bg);
+  vertical-align: middle;
+}
+
+.train-detail-badge.dest {
+  background: var(--success);
+}
+
+.train-detail-badge.current {
+  background: #2563eb;
+}
+
+.train-detail-dot.origin {
+  background: var(--text);
+  border-color: var(--text);
+  width: 12px;
+  height: 12px;
+}
+
+.train-detail-dot.dest {
+  background: var(--success);
+  border-color: var(--success);
+  width: 12px;
+  height: 12px;
 }
