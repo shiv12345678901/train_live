@@ -25,6 +25,11 @@ function getStringArray(input: JsonObject, key: string): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 }
 
+function getNullableString(input: JsonObject, key: string): string | null | undefined {
+  if (!(key in input)) return undefined;
+  return getString(input, key) || null;
+}
+
 function getRouteMode(input: JsonObject): string {
   const mode = getString(input, 'mode') || 'train';
   return ['all', 'train', 'metro', 'bus', 'light_rail', 'ferry'].includes(mode) ? mode : 'train';
@@ -60,6 +65,8 @@ export function routeCreateData(body: JsonObject) {
     destinationStopId: getString(body, 'destinationStopId') || null,
     mode: getRouteMode(body),
     routeFilter: getStringArray(body, 'routeFilter'),
+    pinned: typeof body.pinned === 'boolean' ? body.pinned : false,
+    pinnedAt: getNullableString(body, 'pinnedAt') ?? null,
   };
 }
 
@@ -79,6 +86,8 @@ export function routeUpdates(body: JsonObject): JsonObject {
   if ('mode' in body) updates.mode = getRouteMode(body);
   if (Array.isArray(body.routeFilter)) updates.routeFilter = getStringArray(body, 'routeFilter');
   if (typeof body.enabled === 'boolean') updates.enabled = body.enabled;
+  if (typeof body.pinned === 'boolean') updates.pinned = body.pinned;
+  if ('pinnedAt' in body) updates.pinnedAt = getNullableString(body, 'pinnedAt');
 
   if (typeof updates.origin === 'string' && typeof updates.destination === 'string' &&
     updates.origin.toLowerCase() === updates.destination.toLowerCase()) {
