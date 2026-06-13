@@ -1,5 +1,4 @@
 import type { Handler } from '@netlify/functions';
-import { schedule } from '@netlify/functions';
 import { FieldValue } from 'firebase-admin/firestore';
 import {
   getAlertSchedulesRef,
@@ -493,6 +492,146 @@ async function routeInfoForSchedule(userId: string, routeCardId: string): Promis
   };
 }
 
+export async function runAlertSchedulerForSchedule(userId: string, scheduleId: string): Promise<void> {
+  const apiKey = process.env.TFN_API_KEY;
+  if (!apiKey) return;
+
+  const scheduleDoc = await getAlertSchedulesRef(userId).doc(scheduleId).get();
+  if (!scheduleDoc.exists) return;
+
+  const alert = scheduleDoc.data() as ApiRecord;
+  if (alert.enabled !== true) return;
+
+  const settingsDoc = await getSettingsRef(userId).get();
+  const settings = settingsDoc.data();
+  const botToken = settings?.telegramBotToken || process.env.TELEGRAM_BOT_TOKEN;
+  const chatId = settings?.telegramChatId || process.env.TELEGRAM_CHAT_ID;
+  if (!botToken || !chatId) return;
+
+  const now = new Date();
+  const todayKey = getSydneyDateKey(now);
+  const departureTime = String(alert.departureTime || '');
+  if (!departureTime || !appliesToday(alert, now)) return;
+
+  const departureDate = sydneyLocalDateTimeToUtc(todayKey, departureTime);
+  const minsUntilDeparture = (departureDate.getTime() - now.getTime()) / 60000;
+  const fixedOffsets = (Array.isArray(alert.fixedReminderMinutes) && alert.fixedReminderMinutes.length > 0)
+    ? alert.fixedReminderMinutes.filter((value): value is number => typeof value === 'number')
+    : DEFAULT_FIXED_REMINDERS;
+  const delayRecheckMinutes = typeof alert.delayRecheckMinutes === 'number' ? alert.delayRecheckMinutes : DEFAULT_DELAY_RECHECK_MINUTES;
+  const fallbackWindowMinutes = typeof alert.fallbackWindowMinutes === 'number' ? alert.fallbackWindowMinutes : DEFAULT_FALLBACK_WINDOW_MINUTES;
+  const maxWatchMinutes = Math.max(...fixedOffsets, 25);
+
+  if (minsUntilDeparture < -1 || minsUntilDeparture > maxWatchMinutes + 1) return;
+
+  const routeInfo = await routeInfoForSchedule(userId, String(alert.routeCardId || ''));
+  if (!routeInfo || !routeInfo.origin || !routeInfo.destination) return;
+
+  const deliveryRef = getAlertDeliveryStateRef(userId).doc(scheduleId);
+  const deliveryDoc = await deliveryRef.get();
+  const delivery = (deliveryDoc.data() || { sentKeys: [], lastKnownTripState: null }) as DeliveryState;
+  const sentKeys = delivery.sentKeys || [];
+  const freshSentKeys = sentKeys.filter((key) => key.includes(todayKey));
+  if (freshSentKeys.length < sentKeys.length) await deliveryRef.set({ sentKeys: freshSentKeys }, { merge: true });
+
+  const watch = await resolveWatchedTrain({
+    apiKey,
+    ...routeInfo,
+    departureDate,
+    selectedTripId: String(alert.selectedTripId || ''),
+    selectedPlatform: String(alert.selectedPlatform || ''),
+    targetRoute: String(alert.targetRoute || ''),
+    targetDestination: String(alert.targetDestination || routeInfo.destination),
+    fallbackWindowMinutes,
+  });
+
+  await updateDeliveryState(userId, scheduleId, watch);
+
+  if (minsUntilDeparture >= -0.5 && minsUntilDeparture <= maxWatchMinutes + 1) {
+    const activeKey = watch.active?.tripId || watch.active?.scheduledTime || 'unknown';
+    const sentKey = `${scheduleId}:${todayKey}:availability:${activeKey}`;
+    await sendReservedMessage({
+      userId,
+      scheduleId,
+      sentKey,
+      botToken,
+      chatId,
+      message: formatAvailabilityMessage({
+        title: String(alert.title || 'Train Alert'),
+        origin: routeInfo.origin,
+        destination: routeInfo.destination,
+        departureTime,
+        train: watch.active,
+      }),
+    });
+  }
+
+  if (watch.target?.cancelled && alert.notifyOnCancellationImmediately !== false) {
+    const sentKey = `${scheduleId}:${todayKey}:cancelled:${watch.target.tripId || watch.target.scheduledTime}`;
+    await sendReservedMessage({
+      userId,
+      scheduleId,
+      sentKey,
+      botToken,
+      chatId,
+      message: formatCancellationMessage({
+        title: String(alert.title || 'Train Alert'),
+        origin: routeInfo.origin,
+        destination: routeInfo.destination,
+        target: watch.target,
+        replacement: watch.replacement,
+      }),
+    });
+  }
+
+  const activeTrain = watch.active;
+
+  for (const offset of fixedOffsets) {
+    if (!isWithinWindow(minsUntilDeparture, offset)) continue;
+    const trainKey = activeTrain?.tripId || activeTrain?.scheduledTime || 'unknown';
+    const sentKey = `${scheduleId}:${todayKey}:fixed-${offset}:${trainKey}`;
+    await sendReservedMessage({
+      userId,
+      scheduleId,
+      sentKey,
+      botToken,
+      chatId,
+      message: formatReminderMessage({
+        title: String(alert.title || 'Train Alert'),
+        origin: routeInfo.origin,
+        destination: routeInfo.destination,
+        departureTime,
+        offsetMinutes: offset,
+        train: activeTrain,
+      }),
+    });
+  }
+
+  if (
+    activeTrain &&
+    !activeTrain.cancelled &&
+    activeTrain.status === 'delayed' &&
+    minsUntilDeparture >= -0.5 &&
+    minsUntilDeparture <= maxWatchMinutes
+  ) {
+    const bucket = Math.floor(now.getTime() / (delayRecheckMinutes * 60 * 1000));
+    const sentKey = `${scheduleId}:${todayKey}:delay-${bucket}:${activeTrain.tripId || activeTrain.scheduledTime}:${activeTrain.delayMinutes || 0}`;
+    await sendReservedMessage({
+      userId,
+      scheduleId,
+      sentKey,
+      botToken,
+      chatId,
+      message: formatDelayMessage({
+        title: String(alert.title || 'Train Alert'),
+        origin: routeInfo.origin,
+        destination: routeInfo.destination,
+        train: activeTrain,
+      }),
+    });
+  }
+}
+
 // ─── Main Scheduler ─────────────────────────────────────────────────
 
 export const runAlertScheduler: Handler = async () => {
@@ -652,4 +791,11 @@ export const runAlertScheduler: Handler = async () => {
   }
 };
 
-export const handler = schedule('* * * * *', runAlertScheduler);
+export const handler: Handler = async () => ({
+  statusCode: 200,
+  body: JSON.stringify({
+    ok: true,
+    disabled: true,
+    message: 'Use alert-scheduler-run for Cloudflare-triggered dispatch.',
+  }),
+});

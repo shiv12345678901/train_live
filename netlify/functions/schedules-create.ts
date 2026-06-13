@@ -2,6 +2,7 @@ import { handleCors } from '../../lib/cors';
 import type { Handler } from '@netlify/functions';
 import { getAlertSchedulesRef } from '../../lib/firestore';
 import { parseJsonObject, scheduleCreateData } from '../../lib/validation';
+import { upsertCloudflareScheduleIndex } from '../../lib/cloudflareScheduleIndex';
 
 const handler: Handler = async (event) => {
   const corsResp = handleCors(event.httpMethod); if (corsResp) return corsResp;
@@ -20,6 +21,9 @@ const handler: Handler = async (event) => {
     };
 
     const docRef = await getAlertSchedulesRef(userId).add(docData);
+    await upsertCloudflareScheduleIndex(userId, docRef.id, docData).catch((error) => {
+      console.error('Cloudflare schedule index sync failed:', error);
+    });
 
     return {
       statusCode: 201,

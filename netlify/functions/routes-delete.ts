@@ -1,6 +1,7 @@
 import { handleCors } from '../../lib/cors';
 import type { Handler } from '@netlify/functions';
 import { getAlertDeliveryStateRef, getAlertSchedulesRef, getDb, getRouteCardsRef } from '../../lib/firestore';
+import { deleteCloudflareScheduleIndex } from '../../lib/cloudflareScheduleIndex';
 
 const handler: Handler = async (event) => {
   const corsResp = handleCors(event.httpMethod); if (corsResp) return corsResp;
@@ -26,6 +27,9 @@ const handler: Handler = async (event) => {
     }
 
     await batch.commit();
+    await Promise.all(schedules.docs.map((schedule) => deleteCloudflareScheduleIndex(userId, schedule.id))).catch((error) => {
+      console.error('Cloudflare schedule index delete failed:', error);
+    });
     return {
       statusCode: 200,
       body: JSON.stringify({ success: true, id, deletedSchedules: schedules.size }),

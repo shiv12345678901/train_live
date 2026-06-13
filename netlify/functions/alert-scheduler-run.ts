@@ -1,5 +1,5 @@
 import type { Handler } from '@netlify/functions';
-import { runAlertScheduler } from './alert-scheduler';
+import { runAlertScheduler, runAlertSchedulerForSchedule } from './alert-scheduler';
 
 const json = (statusCode: number, body: Record<string, unknown>) => ({
   statusCode,
@@ -28,6 +28,13 @@ const handler: Handler = async (event, context) => {
   const providedSecret = readSecret(event);
   if (providedSecret !== configuredSecret) {
     return json(401, { error: 'Invalid scheduler secret' });
+  }
+
+  const userId = event.queryStringParameters?.userId || 'default-user';
+  const scheduleId = event.queryStringParameters?.scheduleId;
+  if (scheduleId) {
+    await runAlertSchedulerForSchedule(userId, scheduleId);
+    return json(200, { ok: true, userId, scheduleId });
   }
 
   const response = await runAlertScheduler(event, context);
