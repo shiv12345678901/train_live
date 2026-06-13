@@ -495,7 +495,7 @@ async function routeInfoForSchedule(userId: string, routeCardId: string): Promis
 
 // ─── Main Scheduler ─────────────────────────────────────────────────
 
-const schedulerHandler: Handler = async () => {
+export const runAlertScheduler: Handler = async () => {
   const apiKey = process.env.TFN_API_KEY;
 
   try {
@@ -652,4 +652,4 @@ const schedulerHandler: Handler = async () => {
   }
 };
 
-export const handler = schedule('* * * * *', schedulerHandler);
+export const handler = schedule('* * * * *', runAlertScheduler);

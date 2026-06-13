@@ -61,3 +61,26 @@ Future improvements:
 - Add richer UI controls for changing fallback and delay policy per alert.
 - Expose replacement/delivery state in the schedule list.
 - Add integration tests with mocked TfNSW and Telegram responses.
+
+## Realtime runner deployment
+
+The production scheduler has two entry points:
+
+- `alert-scheduler` remains the Netlify Scheduled Function and is configured in code with the one-minute cron expression.
+- `alert-scheduler-run` is a normal HTTPS Netlify Function that calls the same scheduler code after verifying `SCHEDULER_SECRET`.
+
+Use `alert-scheduler-run` when a guaranteed external runner is needed. Configure these Netlify environment variables:
+
+- `SCHEDULER_SECRET` — random shared secret for the runner endpoint.
+- `FIREBASE_SERVICE_ACCOUNT_KEY` — so the runner can read Firestore schedules/settings and write delivery state.
+- `TFN_API_KEY` — so the runner can resolve live TfNSW service status.
+- `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` as global fallback credentials, unless every user stores Telegram settings in-app.
+
+Then call the endpoint every minute from a trusted cron service:
+
+```bash
+curl -fsS -H "x-scheduler-secret: $SCHEDULER_SECRET" \
+  "https://YOUR_SITE.netlify.app/.netlify/functions/alert-scheduler-run"
+```
+
+This mirrors the old GitHub Action prototype pattern, but keeps the alert logic inside the deployed backend. The scheduled and HTTP runners share delivery-state sent keys, so running both does not duplicate Telegram messages.
