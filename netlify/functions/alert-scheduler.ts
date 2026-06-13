@@ -318,8 +318,31 @@ async function enrichPlatformsFromDepartureMonitor(candidates: LiveTrain[], opti
   if (candidates.length === 0) return candidates;
 
   try {
-    const dmType = options.originStopId ? 'stop' : 'any';
-    const dmName = options.originStopId || options.origin;
+    // Resolve stop ID if not provided (same issue as routes-trains)
+    let dmName = options.originStopId;
+    let dmType = 'stop';
+
+    if (!dmName) {
+      // Try Stop Finder to get proper ID
+      const sfUrl = `https://api.transport.nsw.gov.au/v1/tp/stop_finder?outputFormat=rapidJSON&type_sf=any&name_sf=${encodeURIComponent(options.origin)}&TfNSWSF=true&version=10.2.1.42`;
+      const sfRes = await fetchWithTimeout(sfUrl, { headers: { Authorization: `apikey ${options.apiKey}` } }, 6000);
+      if (sfRes.ok) {
+        const sfData = (await sfRes.json()) as ApiRecord;
+        const locs = (sfData?.locations || []) as ApiRecord[];
+        for (const loc of locs) {
+          if (loc.isGlobalId && loc.type === 'stop') {
+            dmName = String(loc.id);
+            break;
+          }
+        }
+      }
+    }
+
+    if (!dmName) {
+      dmName = options.origin;
+      dmType = 'any';
+    }
+
     const dmUrl = `https://api.transport.nsw.gov.au/v1/tp/departure_mon` +
       `?outputFormat=rapidJSON` +
       `&coordOutputFormat=EPSG%3A4326` +
@@ -375,12 +398,27 @@ async function enrichPlatformsFromDepartureMonitor(candidates: LiveTrain[], opti
 }
 
 function scoreCandidate(train: LiveTrain, options: ResolveOptions): number {
-  let score = Math.max(0, 40 - Math.abs(train.diffMinutes) * 4);
-  if (options.targetRoute && routeMatches(train.route, options.targetRoute)) score += 60;
-  if (destinationMatches(train.destination, options.targetDestination || options.destination)) score += 40;
-  if (options.selectedPlatform && train.platform === options.selectedPlatform) score += 30;
-  if (options.selectedTripId && train.tripId && train.tripId === options.selectedTripId) score += 20;
-  if (train.cancelled) score -= 5;
+  // MUST match destination — reject if train doesn't go where user wants
+  if (!destinationMatches(train.destination, options.targetDestination || options.destination)) {
+    return -999;
+  }
+
+  // Strongly prefer the train closest to the user's set departure time
+  const timePenalty = Math.abs(train.diffMinutes) * 10;
+  let score = 100 - timePenalty;
+
+  // Exact time match (within 1 min) gets massive bonus
+  if (Math.abs(train.diffMinutes) <= 1) score += 80;
+
+  // Route match
+  if (options.targetRoute && routeMatches(train.route, options.targetRoute)) score += 40;
+
+  // Trip ID match (same service from when user tapped bell)
+  if (options.selectedTripId && train.tripId && train.tripId === options.selectedTripId) score += 50;
+
+  // Cancelled trains score lower
+  if (train.cancelled) score -= 30;
+
   return score;
 }
 
@@ -401,8 +439,12 @@ async function resolveWatchedTrain(options: ResolveOptions): Promise<ResolvedWat
   const candidates = await fetchTrainCandidates(options);
   if (candidates.length === 0) return { target: null, active: null, replacement: null };
 
-  const target = [...candidates].sort((a, b) => scoreCandidate(b, options) - scoreCandidate(a, options))[0];
-  const replacement = target.cancelled ? findReplacement(candidates, target, options) : null;
+  // Only consider trains that match the destination (score > 0)
+  const validCandidates = candidates.filter(c => scoreCandidate(c, options) > 0);
+  if (validCandidates.length === 0) return { target: null, active: null, replacement: null };
+
+  const target = [...validCandidates].sort((a, b) => scoreCandidate(b, options) - scoreCandidate(a, options))[0];
+  const replacement = target.cancelled ? findReplacement(validCandidates, target, options) : null;
 
   return {
     target,
@@ -454,11 +496,18 @@ function shortStop(name: string): string {
 }
 
 function trainTime(train: LiveTrain | null, fallbackTime: string): string {
-  return train ? formatIsoSydneyTime(train.estimatedTime || train.scheduledTime) : formatTime12h(fallbackTime);
+  if (train) {
+    const realTime = train.estimatedTime || train.scheduledTime;
+    const formatted = formatIsoSydneyTime(realTime);
+    if (formatted) return formatted;
+  }
+  return formatTime12h(fallbackTime);
 }
 
 function trainPlatform(train: LiveTrain | null, fallbackPlatform = ''): string {
-  return train?.platform || fallbackPlatform || 'TBC';
+  if (train?.platform) return train.platform;
+  if (fallbackPlatform) return fallbackPlatform;
+  return '';
 }
 
 function standardMessage(opts: {
@@ -469,11 +518,11 @@ function standardMessage(opts: {
   alert?: string;
 }): string {
   const lines = [
-    `<b>${shortStop(opts.origin)} to ${shortStop(opts.destination)}</b>`,
-    `At: <b>${opts.time}</b>`,
-    `Platform: <b>${opts.platform}</b>`,
+    `<b>${shortStop(opts.origin)} → ${shortStop(opts.destination)}</b>`,
+    `Departs: <b>${opts.time}</b>`,
   ];
-  if (opts.alert) lines.push(`Alert: ${opts.alert}`);
+  if (opts.platform) lines.push(`Platform: <b>${opts.platform}</b>`);
+  if (opts.alert) lines.push(`⚠️ ${opts.alert}`);
   return lines.join('\n');
 }
 
@@ -501,6 +550,7 @@ function formatReminderMessage(opts: {
 }): string {
   const { origin, destination, departureTime, train, fallbackPlatform } = opts;
 
+  // Always use the real train time from API, not the saved alert time
   return standardMessage({
     origin,
     destination,
