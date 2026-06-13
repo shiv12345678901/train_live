@@ -34,6 +34,7 @@ interface AppState {
   alertSchedules: AlertSchedule[];
   loadAlertSchedules: () => Promise<void>;
   saveAlertSchedule: (schedule: Omit<AlertSchedule, 'id' | 'createdAt' | 'updatedAt'>) => Promise<void>;
+  updateAlertSchedule: (id: string, updates: Partial<AlertSchedule>) => Promise<void>;
   toggleAlertSchedule: (id: string, enabled: boolean) => Promise<void>;
   deleteAlertSchedule: (id: string) => Promise<void>;
 
@@ -491,6 +492,28 @@ export const useAppStore = create<AppState>()((set, get) => ({
       });
     } catch {
       addPendingOp({ type: 'create_schedule', payload: { localId: localSchedule.id, schedule } });
+    }
+  },
+
+
+  updateAlertSchedule: async (id, updates) => {
+    set((state) => {
+      const updated = state.alertSchedules.map((s) =>
+        s.id === id ? { ...s, ...updates, updatedAt: new Date().toISOString() } : s
+      );
+      setLocalAlertSchedules(updated);
+      return { alertSchedules: updated };
+    });
+
+    try {
+      const saved = await updateSchedule(id, updates);
+      set((state) => {
+        const updated = state.alertSchedules.map((s) => s.id === id ? saved : s);
+        setLocalAlertSchedules(updated);
+        return { alertSchedules: updated };
+      });
+    } catch {
+      addPendingOp({ type: 'update_schedule', payload: { id, updates } });
     }
   },
 

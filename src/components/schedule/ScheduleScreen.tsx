@@ -15,12 +15,16 @@ export function ScheduleScreen() {
     loadAlertSchedules,
     loadRouteCards,
     saveAlertSchedule,
+    updateAlertSchedule,
     pendingAlertPrefill,
     setPendingAlertPrefill,
     settings,
   } = useAppStore();
   const [showForm, setShowForm] = useState(false);
-  const isFormOpen = showForm || Boolean(pendingAlertPrefill);
+  const [editingScheduleId, setEditingScheduleId] = useState<string | null>(null);
+  const [expandedScheduleId, setExpandedScheduleId] = useState<string | null>(null);
+  const editingSchedule = editingScheduleId ? alertSchedules.find((schedule) => schedule.id === editingScheduleId) || null : null;
+  const isFormOpen = showForm || Boolean(pendingAlertPrefill) || Boolean(editingSchedule);
 
   useEffect(() => {
     loadAlertSchedules();
@@ -56,14 +60,13 @@ export function ScheduleScreen() {
       // Still allow save — just warn
     }
 
-    // Feature 35: batch creation — if recurring with days, create one schedule covering all days
-    await saveAlertSchedule({
+    const payload = {
       routeCardId: formData.routeCardId || pendingAlertPrefill?.routeCardId || '',
       title: formData.title,
       departureTime: formData.departureTime,
       days: formData.days,
       oneTimeDate: formData.oneTimeDate,
-      enabled: true,
+      enabled: editingSchedule?.enabled ?? true,
       fixedReminderMinutes: [25, 20, 10, 5],
       changeCheckMinutes: [],
       selectedTripId: formData.tripId,
@@ -74,33 +77,44 @@ export function ScheduleScreen() {
       delayRecheckMinutes: 2,
       fallbackWindowMinutes: 5,
       notifyOnCancellationImmediately: true,
-    });
+    };
+
+    if (editingSchedule) {
+      await updateAlertSchedule(editingSchedule.id, payload);
+      setExpandedScheduleId(editingSchedule.id);
+      toast('Schedule updated', 'success');
+    } else {
+      await saveAlertSchedule(payload);
+      const dayCount = formData.days.length;
+      toast(
+        dayCount > 1
+          ? `Alert set for ${dayCount} days at ${formData.departureTime}`
+          : 'Alert created',
+        'success'
+      );
+    }
 
     hapticSuccess();
-    const dayCount = formData.days.length;
-    toast(
-      dayCount > 1
-        ? `Alert set for ${dayCount} days at ${formData.departureTime}`
-        : 'Alert created',
-      'success'
-    );
     setShowForm(false);
+    setEditingScheduleId(null);
     setPendingAlertPrefill(null);
   };
 
   const handleCancel = () => {
     setShowForm(false);
+    setEditingScheduleId(null);
     setPendingAlertPrefill(null);
   };
 
   if (isFormOpen) {
     return (
       <div>
-        <PageHeader title="New Alert" backButton onBack={handleCancel} />
+        <PageHeader title={editingSchedule ? 'Edit Alert' : 'New Alert'} backButton onBack={handleCancel} />
         {pendingAlertPrefill && <AlertSummary data={pendingAlertPrefill} />}
         <div className="schedule-content">
           <AlertForm
             prefillData={pendingAlertPrefill}
+            editSchedule={editingSchedule}
             routeCards={routeCards}
             onSave={handleSave}
             onCancel={handleCancel}
@@ -117,7 +131,14 @@ export function ScheduleScreen() {
         <button className="btn-primary schedule-new-btn" onClick={() => setShowForm(true)}>
           New Alert
         </button>
-        <AlertList schedules={alertSchedules} telegramConfigured={settings.telegramConnected} />
+        <AlertList
+          schedules={alertSchedules}
+          routeCards={routeCards}
+          telegramConfigured={settings.telegramConnected}
+          expandedId={expandedScheduleId}
+          onExpand={setExpandedScheduleId}
+          onEdit={(schedule) => { setEditingScheduleId(schedule.id); setShowForm(true); }}
+        />
       </div>
     </div>
   );

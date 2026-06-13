@@ -7,6 +7,7 @@ interface TrainCardProps {
   train: TrainDeparture;
   onBellTap?: () => void;
   onTap?: () => void;
+  isScheduled?: boolean;
 }
 
 function formatTime(isoTime: string): string {
@@ -176,7 +177,7 @@ function TransportIcon({ mode }: { mode: string }) {
   }
 }
 
-export function TrainCard({ train, onBellTap, onTap }: TrainCardProps) {
+export function TrainCard({ train, onBellTap, onTap, isScheduled = false }: TrainCardProps) {
   const displayTime = train.estimatedTime || train.scheduledTime;
   const timeStr = displayTime ? formatTime(displayTime) : null;
   const scheduledStr = formatTime(train.scheduledTime);
@@ -239,11 +240,19 @@ export function TrainCard({ train, onBellTap, onTap }: TrainCardProps) {
             )}
           </div>
           {!train.cancelled && onBellTap && (
-            <button className="train-card-bell-icon" onClick={handleBellClick} type="button" aria-label="Set alert">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
-                <path d="M13.73 21a2 2 0 0 1-3.46 0" />
-              </svg>
+            <button className={`train-card-bell-icon ${isScheduled ? 'is-scheduled' : ''}`} onClick={handleBellClick} type="button" aria-label={isScheduled ? 'Scheduled alert' : 'Set alert'} title={isScheduled ? 'Scheduled' : 'Set alert'}>
+              {isScheduled ? (
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+                  <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+                  <path d="M20 4L9 15l-5-5" />
+                </svg>
+              ) : (
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+                  <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+                </svg>
+              )}
             </button>
           )}
         </div>

@@ -17,6 +17,8 @@ export function RouteDetailsPage() {
   const routeCards = useAppStore((s) => s.routeCards);
   const loadRouteCards = useAppStore((s) => s.loadRouteCards);
   const liveTrains = useAppStore((s) => s.liveTrains);
+  const alertSchedules = useAppStore((s) => s.alertSchedules);
+  const loadAlertSchedules = useAppStore((s) => s.loadAlertSchedules);
   const liveTrainsLoading = useAppStore((s) => s.liveTrainsLoading);
   const liveTrainsError = useAppStore((s) => s.liveTrainsError);
   const liveTrainsUpdatedAt = useAppStore((s) => s.liveTrainsUpdatedAt);
@@ -56,11 +58,12 @@ export function RouteDetailsPage() {
 
   useEffect(() => {
     let cancelled = false;
+    loadAlertSchedules();
     loadRouteCards().finally(() => {
       if (!cancelled) setRoutesLoaded(true);
     });
     return () => { cancelled = true; };
-  }, [loadRouteCards]);
+  }, [loadAlertSchedules, loadRouteCards]);
 
   // Fetch trains once on mount with limit=20
   useEffect(() => {
@@ -126,6 +129,20 @@ export function RouteDetailsPage() {
   function formatPrefillTime(isoTime: string): string {
     return formatTransportTime24(isoTime);
   }
+
+
+  const isTrainScheduled = (train: TrainDeparture): boolean => {
+    if (!card) return false;
+    const trainTime = formatTransportTime24(train.estimatedTime || train.scheduledTime);
+    return alertSchedules.some((schedule) => {
+      if (!schedule.enabled || schedule.routeCardId !== card.id) return false;
+      if (schedule.departureTime !== trainTime) return false;
+      if (schedule.selectedTripId && schedule.selectedTripId === train.tripId) return true;
+      if (schedule.targetRoute && schedule.targetRoute !== train.route) return false;
+      if (schedule.selectedPlatform && schedule.selectedPlatform !== train.platform) return false;
+      return true;
+    });
+  };
 
   const handleBellTap = (train: TrainDeparture) => {
     if (!card) return;
@@ -232,6 +249,7 @@ export function RouteDetailsPage() {
               train={train}
               onBellTap={() => handleBellTap(train)}
               onTap={() => setSelectedTrain(isSelected ? null : train)}
+              isScheduled={isTrainScheduled(train)}
             />
             {isSelected && card && (
               <TrainDetailSheet

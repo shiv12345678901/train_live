@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import type { AlertPrefillData, RouteCard } from '@/types';
+import type { AlertPrefillData, AlertSchedule, RouteCard } from '@/types';
 
 interface AlertFormProps {
   prefillData?: AlertPrefillData | null;
+  editSchedule?: AlertSchedule | null;
   routeCards: RouteCard[];
   onSave: (formData: AlertFormData) => void;
   onCancel: () => void;
@@ -49,13 +50,13 @@ function getTodayString(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-export function AlertForm({ prefillData, routeCards, onSave, onCancel }: AlertFormProps) {
-  const [selectedRouteId, setSelectedRouteId] = useState(prefillData?.routeCardId || '');
-  const [title, setTitle] = useState(prefillData?.routeTitle || '');
-  const [departureTime, setDepartureTime] = useState(prefillData?.departureTime || '');
-  const [isRecurring, setIsRecurring] = useState(true);
-  const [selectedDays, setSelectedDays] = useState<number[]>([1, 2, 3, 4, 5]);
-  const [oneTimeDate, setOneTimeDate] = useState('');
+export function AlertForm({ prefillData, editSchedule, routeCards, onSave, onCancel }: AlertFormProps) {
+  const [selectedRouteId, setSelectedRouteId] = useState(editSchedule?.routeCardId || prefillData?.routeCardId || '');
+  const [title, setTitle] = useState(editSchedule?.title || prefillData?.routeTitle || '');
+  const [departureTime, setDepartureTime] = useState(editSchedule?.departureTime || prefillData?.departureTime || '');
+  const [isRecurring, setIsRecurring] = useState(!editSchedule?.oneTimeDate);
+  const [selectedDays, setSelectedDays] = useState<number[]>(editSchedule?.days?.length ? editSchedule.days : [1, 2, 3, 4, 5]);
+  const [oneTimeDate, setOneTimeDate] = useState(editSchedule?.oneTimeDate || '');
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const selectedRoute = routeCards.find((r) => r.id === selectedRouteId);
@@ -103,10 +104,10 @@ export function AlertForm({ prefillData, routeCards, onSave, onCancel }: AlertFo
       departureTime,
       days: isRecurring ? selectedDays : [],
       oneTimeDate: !isRecurring ? oneTimeDate : undefined,
-      tripId: prefillData?.tripId,
-      platform: prefillData?.platform || undefined,
-      targetRoute: prefillData?.targetRoute,
-      targetDestination: prefillData?.targetDestination,
+      tripId: prefillData?.tripId || editSchedule?.selectedTripId,
+      platform: prefillData?.platform || editSchedule?.selectedPlatform || undefined,
+      targetRoute: prefillData?.targetRoute || editSchedule?.targetRoute,
+      targetDestination: prefillData?.targetDestination || editSchedule?.targetDestination,
     });
   };
 
@@ -255,7 +256,7 @@ export function AlertForm({ prefillData, routeCards, onSave, onCancel }: AlertFo
       {/* Actions */}
       <div className="alert-form-actions">
         <button type="button" className="btn-secondary" onClick={onCancel}>Cancel</button>
-        <button type="submit" className="btn-primary">Set alert</button>
+        <button type="submit" className="btn-primary">{editSchedule ? 'Save changes' : 'Set alert'}</button>
       </div>
     </form>
   );
