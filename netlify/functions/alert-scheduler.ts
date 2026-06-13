@@ -15,6 +15,7 @@ const NSW_TIME_ZONE = 'Australia/Sydney';
 const DEFAULT_FIXED_REMINDERS = [25, 20, 10, 5];
 const DEFAULT_DELAY_RECHECK_MINUTES = 2;
 const DEFAULT_FALLBACK_WINDOW_MINUTES = 5;
+const NEAREST_TRAIN_SEARCH_WINDOW_MINUTES = 15;
 
 type ApiRecord = Record<string, unknown>;
 
@@ -29,6 +30,12 @@ interface LiveTrain {
   delayMinutes?: number;
   cancelled: boolean;
   diffMinutes: number;
+  alerts: ServiceAlert[];
+}
+
+interface ServiceAlert {
+  title: string;
+  description: string;
 }
 
 interface RouteInfo {
@@ -169,6 +176,20 @@ function extractPlatform(originInfo: ApiRecord): string {
   return match ? match[2] : platformName;
 }
 
+function parseServiceAlerts(infos: ApiRecord[]): ServiceAlert[] {
+  const alerts: ServiceAlert[] = [];
+  for (const info of infos.slice(0, 3)) {
+    const title = String(info.title || info.subtitle || '').trim();
+    const description = String(info.content || info.description || '').trim();
+    if (!title && !description) continue;
+    alerts.push({
+      title: title || description.slice(0, 80),
+      description,
+    });
+  }
+  return alerts;
+}
+
 function appliesToday(alert: ApiRecord, now: Date): boolean {
   const todayKey = getSydneyDateKey(now);
   if (alert.oneTimeDate) return String(alert.oneTimeDate) === todayKey;
@@ -187,11 +208,10 @@ async function fetchTrainCandidates(options: ResolveOptions): Promise<LiveTrain[
     originStopId,
     destinationStopId,
     departureDate,
-    fallbackWindowMinutes,
   } = options;
 
   try {
-    const queryDate = new Date(departureDate.getTime() - fallbackWindowMinutes * 60 * 1000);
+    const queryDate = new Date(departureDate.getTime() - NEAREST_TRAIN_SEARCH_WINDOW_MINUTES * 60 * 1000);
     const originType = originStopId ? 'stop' : 'any';
     const originName = originStopId || origin;
     const destinationType = destinationStopId ? 'stop' : 'any';
@@ -237,7 +257,7 @@ async function fetchTrainCandidates(options: ResolveOptions): Promise<LiveTrain[
       if (Number.isNaN(scheduledMs)) continue;
 
       const diffMinutes = Math.round((scheduledMs - departureDate.getTime()) / 60000);
-      if (Math.abs(diffMinutes) > Math.max(fallbackWindowMinutes, 10)) continue;
+      if (Math.abs(diffMinutes) > NEAREST_TRAIN_SEARCH_WINDOW_MINUTES) continue;
 
       const tripId = String(transportation.id || '');
       const route = String(transportation.disassembledName || transportation.number || '');
@@ -248,6 +268,7 @@ async function fetchTrainCandidates(options: ResolveOptions): Promise<LiveTrain[
       const estimatedTime = estimatedTimeRaw || undefined;
       const cancelled = leg.isCancelled === true;
       const { status, delayMinutes } = getTimingStatus(scheduledTime, estimatedTime, cancelled);
+      const alerts = parseServiceAlerts((journey.infos || []) as ApiRecord[]);
       const key = `${tripId}:${scheduledTime}:${platform}`;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -263,6 +284,7 @@ async function fetchTrainCandidates(options: ResolveOptions): Promise<LiveTrain[
         delayMinutes,
         cancelled,
         diffMinutes,
+        alerts,
       });
     }
 
@@ -351,10 +373,41 @@ function shortStop(name: string): string {
   return name.replace(/\s*(Station|Wharf|Light Rail)\s*/gi, '').replace(/,.*$/, '').trim();
 }
 
-function trainLine(train: LiveTrain): string {
-  return [train.route, train.platform ? `Platform ${train.platform}` : '', formatIsoSydneyTime(train.estimatedTime || train.scheduledTime)]
-    .filter(Boolean)
-    .join(' • ');
+function trainTime(train: LiveTrain | null, fallbackTime: string): string {
+  return train ? formatIsoSydneyTime(train.estimatedTime || train.scheduledTime) : formatTime12h(fallbackTime);
+}
+
+function trainPlatform(train: LiveTrain | null): string {
+  return train?.platform || 'TBC';
+}
+
+function standardMessage(opts: {
+  origin: string;
+  destination: string;
+  time: string;
+  platform: string;
+  alert?: string;
+}): string {
+  const lines = [
+    `<b>${shortStop(opts.origin)} to ${shortStop(opts.destination)}</b>`,
+    `At: <b>${opts.time}</b>`,
+    `Platform: <b>${opts.platform}</b>`,
+  ];
+  if (opts.alert) lines.push(`Alert: ${opts.alert}`);
+  return lines.join('\n');
+}
+
+function serviceAlertText(train: LiveTrain | null): string | undefined {
+  const serviceAlert = train?.alerts.find((alert) => alert.title || alert.description);
+  if (serviceAlert) {
+    return [serviceAlert.title, serviceAlert.description]
+      .filter(Boolean)
+      .join(' - ')
+      .slice(0, 500);
+  }
+  if (train?.cancelled) return 'Cancelled';
+  if (train?.status === 'delayed' && train.delayMinutes) return `Delayed ${train.delayMinutes} min`;
+  return undefined;
 }
 
 function formatReminderMessage(opts: {
@@ -365,28 +418,15 @@ function formatReminderMessage(opts: {
   offsetMinutes: number;
   train: LiveTrain | null;
 }): string {
-  const { title, origin, destination, departureTime, offsetMinutes, train } = opts;
-  const lines: string[] = [
-    `🚆 <b>${title}</b>`,
-    ``,
-    `${shortStop(origin)} → ${shortStop(destination)}`,
-    `⏰ <b>${formatTime12h(departureTime)}</b> — ${offsetMinutes} min reminder`,
-  ];
+  const { origin, destination, departureTime, train } = opts;
 
-  if (train) {
-    lines.push(``, trainLine(train));
-    if (train.cancelled) {
-      lines.push(`❌ <b>CANCELLED</b>`);
-    } else if (train.status === 'delayed' && train.delayMinutes) {
-      lines.push(`⚠️ Delayed ${train.delayMinutes} min`);
-    } else {
-      lines.push(`✅ Available / on time`);
-    }
-  } else {
-    lines.push(``, `ℹ️ Live status unavailable`);
-  }
-
-  return lines.join('\n');
+  return standardMessage({
+    origin,
+    destination,
+    time: trainTime(train, departureTime),
+    platform: trainPlatform(train),
+    alert: serviceAlertText(train),
+  });
 }
 
 
@@ -397,28 +437,15 @@ function formatAvailabilityMessage(opts: {
   departureTime: string;
   train: LiveTrain | null;
 }): string {
-  const { title, origin, destination, departureTime, train } = opts;
-  const lines: string[] = [
-    `✅ <b>${title} — Watch started</b>`,
-    ``,
-    `${shortStop(origin)} → ${shortStop(destination)}`,
-    `Target departure: <b>${formatTime12h(departureTime)}</b>`,
-  ];
+  const { origin, destination, departureTime, train } = opts;
 
-  if (train) {
-    lines.push(``, trainLine(train));
-    if (train.cancelled) {
-      lines.push(`❌ Currently cancelled — checking replacement options.`);
-    } else if (train.status === 'delayed' && train.delayMinutes) {
-      lines.push(`⚠️ Currently delayed ${train.delayMinutes} min`);
-    } else {
-      lines.push(`Available. Reminders will continue at 25, 20, 10 and 5 min when applicable.`);
-    }
-  } else {
-    lines.push(``, `No matching service found yet. I will keep checking until departure.`);
-  }
-
-  return lines.join('\n');
+  return standardMessage({
+    origin,
+    destination,
+    time: trainTime(train, departureTime),
+    platform: trainPlatform(train),
+    alert: serviceAlertText(train),
+  });
 }
 
 function formatCancellationMessage(opts: {
@@ -428,21 +455,18 @@ function formatCancellationMessage(opts: {
   target: LiveTrain;
   replacement: LiveTrain | null;
 }): string {
-  const { title, origin, destination, target, replacement } = opts;
-  const lines = [
-    `❌ <b>${title} — Train cancelled</b>`,
-    ``,
-    `${shortStop(origin)} → ${shortStop(destination)}`,
-    `Cancelled service: ${trainLine(target)}`,
-  ];
+  const { origin, destination, target, replacement } = opts;
+  const alert = serviceAlertText(target) || (replacement
+    ? `Cancelled. Replacement at ${formatIsoSydneyTime(replacement.estimatedTime || replacement.scheduledTime)} on platform ${trainPlatform(replacement)}`
+    : 'Cancelled. No close replacement found');
 
-  if (replacement) {
-    lines.push(``, `✅ Auto-switched to next matching service:`, trainLine(replacement));
-  } else {
-    lines.push(``, `No same-platform, same-route replacement found within 5 min. Please check the app.`);
-  }
-
-  return lines.join('\n');
+  return standardMessage({
+    origin,
+    destination,
+    time: trainTime(target, target.scheduledTime),
+    platform: trainPlatform(target),
+    alert,
+  });
 }
 
 function formatDelayMessage(opts: {
@@ -451,17 +475,14 @@ function formatDelayMessage(opts: {
   destination: string;
   train: LiveTrain;
 }): string {
-  const { title, origin, destination, train } = opts;
-  const lines = [
-    `⚠️ <b>${title} — Delay update</b>`,
-    ``,
-    `${shortStop(origin)} → ${shortStop(destination)}`,
-    trainLine(train),
-    `Delayed ${train.delayMinutes || '?'} min`,
-    `Next check in 2 min while delayed.`,
-  ];
-
-  return lines.join('\n');
+  const { origin, destination, train } = opts;
+  return standardMessage({
+    origin,
+    destination,
+    time: trainTime(train, train.scheduledTime),
+    platform: trainPlatform(train),
+    alert: serviceAlertText(train),
+  });
 }
 
 async function sendReservedMessage(opts: {

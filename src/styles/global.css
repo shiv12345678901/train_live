@@ -825,11 +825,12 @@ body {
 }
 
 .route-details-trains {
-  padding: 0 var(--space-lg);
+  position: relative;
+  z-index: 1;
+  padding: var(--space-md) var(--space-lg) 24px;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding-bottom: 24px;
 }
 
 .load-more-btn {
@@ -2083,6 +2084,10 @@ body {
   animation: page-appear 0.25s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
+.app-main > .route-details-page {
+  animation: none;
+}
+
 @keyframes page-appear {
   from {
     opacity: 0;
@@ -3003,11 +3008,10 @@ body {
 .route-details-header {
   position: sticky;
   top: 0;
-  z-index: 80;
+  z-index: 120;
   padding: 0 16px 12px;
-  background: color-mix(in srgb, var(--bg) 94%, transparent);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -3015,10 +3019,14 @@ body {
 }
 
 .route-details-header .page-header {
+  position: static;
   width: 100%;
-  padding-bottom: 0;
+  z-index: auto;
+  padding: var(--space-xl) 0 0;
   background: none;
   backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border-bottom: 0;
 }
 
 .route-details-header-meta {

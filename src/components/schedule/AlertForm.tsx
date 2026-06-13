@@ -60,6 +60,8 @@ export function AlertForm({ prefillData, editSchedule, routeCards, onSave, onCan
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const selectedRoute = routeCards.find((r) => r.id === selectedRouteId);
+  const usesPrefilledTrain = Boolean(prefillData?.departureTime && departureTime === prefillData.departureTime);
+  const usesEditedTrain = Boolean(editSchedule?.departureTime && departureTime === editSchedule.departureTime);
 
   const handleRouteSelect = (routeId: string) => {
     setSelectedRouteId(routeId);
@@ -104,10 +106,10 @@ export function AlertForm({ prefillData, editSchedule, routeCards, onSave, onCan
       departureTime,
       days: isRecurring ? selectedDays : [],
       oneTimeDate: !isRecurring ? oneTimeDate : undefined,
-      tripId: prefillData?.tripId || editSchedule?.selectedTripId,
-      platform: prefillData?.platform || editSchedule?.selectedPlatform || undefined,
-      targetRoute: prefillData?.targetRoute || editSchedule?.targetRoute,
-      targetDestination: prefillData?.targetDestination || editSchedule?.targetDestination,
+      tripId: usesPrefilledTrain ? prefillData?.tripId : usesEditedTrain ? editSchedule?.selectedTripId : undefined,
+      platform: usesPrefilledTrain ? prefillData?.platform : usesEditedTrain ? editSchedule?.selectedPlatform || undefined : undefined,
+      targetRoute: usesPrefilledTrain ? prefillData?.targetRoute : usesEditedTrain ? editSchedule?.targetRoute : undefined,
+      targetDestination: usesPrefilledTrain ? prefillData?.targetDestination : usesEditedTrain ? editSchedule?.targetDestination : undefined,
     });
   };
 
@@ -248,7 +250,10 @@ export function AlertForm({ prefillData, editSchedule, routeCards, onSave, onCan
             <path d="M13.73 21a2 2 0 0 1-3.46 0" />
           </svg>
           <span>
-            Watch the selected service at {formatTimeDisplay(departureTime)}. Reminders: 25, 20, 10 and 5 min. Delay checks repeat every 2 min; cancellations auto-switch to the next matching service.
+            {usesPrefilledTrain
+              ? `Watch the selected train-card service at ${formatTimeDisplay(departureTime)}.`
+              : `Find and watch the nearest train on this route around ${formatTimeDisplay(departureTime)}.`}
+            {' '}Reminders: 25, 20, 10 and 5 min. Delay checks repeat every 2 min; cancellations auto-switch to the next matching service.
           </span>
         </div>
       )}

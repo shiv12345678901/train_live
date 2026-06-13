@@ -497,6 +497,7 @@ async function fetchViaTripPlanner(
 
   const departures: TrainDeparture[] = [];
   const seen = new Set<string>();
+  const destLower = normalizeStopName(destination);
 
   for (const journey of journeys) {
     const allLegs = (journey.legs || []) as Array<Record<string, unknown>>;
@@ -510,6 +511,7 @@ async function fetchViaTripPlanner(
     if (transitLegs.length === 0) continue;
 
     const firstLeg = transitLegs[0];
+    if (!legServesDestination(firstLeg, destLower, destinationStopId)) continue;
 
     const transportation = (firstLeg.transportation || {}) as Record<string, unknown>;
     const product = (transportation.product || {}) as Record<string, unknown>;
@@ -877,6 +879,39 @@ function servesDestination(
   }
 
   return false;
+}
+
+function normalizeStopName(value: unknown): string {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/\s*station\s*/gi, '')
+    .replace(/\s*wharf\s*/gi, '')
+    .trim();
+}
+
+function stopMatchesDestination(stop: Record<string, unknown>, destLower: string, destStopId?: string): boolean {
+  if (destStopId) {
+    if (String(stop.id || '') === destStopId) return true;
+    const parent = (stop.parent || {}) as Record<string, unknown>;
+    if (String(parent.id || '') === destStopId) return true;
+  }
+
+  const stopName = normalizeStopName(stop.name);
+  const parent = (stop.parent || {}) as Record<string, unknown>;
+  const parentName = normalizeStopName(parent.name);
+
+  return Boolean(
+    (stopName && (stopName.includes(destLower) || destLower.includes(stopName))) ||
+    (parentName && (parentName.includes(destLower) || destLower.includes(parentName)))
+  );
+}
+
+function legServesDestination(leg: Record<string, unknown>, destLower: string, destStopId?: string): boolean {
+  const destination = (leg.destination || {}) as Record<string, unknown>;
+  if (stopMatchesDestination(destination, destLower, destStopId)) return true;
+
+  const stopSequence = (leg.stopSequence || []) as Array<Record<string, unknown>>;
+  return stopSequence.some((stop) => stopMatchesDestination(stop, destLower, destStopId));
 }
 
 export { handler };

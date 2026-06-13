@@ -39,14 +39,23 @@ function appliesToday(schedule, parts) {
 }
 
 function dueEvents(schedule, now) {
-  if (!schedule.enabled || !appliesToday(schedule, now.parts)) return [];
+  if (!schedule.enabled) {
+    return { events: [], reason: 'disabled' };
+  }
+  if (!appliesToday(schedule, now.parts)) {
+    return { events: [], reason: 'not_today' };
+  }
 
   const departureMinute = minuteOfDay(schedule.departureTime);
-  if (departureMinute === null) return [];
+  if (departureMinute === null) {
+    return { events: [], reason: 'bad_departure_time' };
+  }
 
   const currentMinute = Number(now.parts.hour) * 60 + Number(now.parts.minute);
   const minutesUntilDeparture = departureMinute - currentMinute;
-  if (minutesUntilDeparture < -1 || minutesUntilDeparture > 26) return [];
+  if (minutesUntilDeparture < -1 || minutesUntilDeparture > 26) {
+    return { events: [], minutesUntilDeparture, reason: 'outside_watch_window' };
+  }
 
   const events = [];
   const fixedOffsets = Array.isArray(schedule.fixedReminderMinutes) && schedule.fixedReminderMinutes.length > 0
@@ -64,11 +73,16 @@ function dueEvents(schedule, now) {
     events.push(`recheck-${minutesUntilDeparture}`);
   }
 
-  return events;
+  return {
+    events,
+    minutesUntilDeparture,
+    reason: events.length > 0 ? 'due' : 'inside_watch_window_not_due',
+  };
 }
 
 async function alreadyDispatched(env, schedule, eventName, today) {
-  const key = `${DISPATCH_PREFIX}${schedule.userId}:${schedule.scheduleId}:${today}:${eventName}`;
+  const departureKey = String(schedule.departureTime || 'unknown').replace(/[^0-9:]/g, '');
+  const key = `${DISPATCH_PREFIX}${schedule.userId}:${schedule.scheduleId}:${today}:${departureKey}:${eventName}`;
   const existing = await env.SCHEDULES.get(key);
   if (existing) return true;
   await env.SCHEDULES.put(key, '1', { expirationTtl: 2 * 24 * 60 * 60 });
@@ -100,6 +114,7 @@ async function runDueChecks(env) {
   const today = dateKey(parts);
   const now = { date: nowDate, parts };
   let cursor;
+  let scanned = 0;
   let dispatched = 0;
 
   do {
@@ -109,15 +124,39 @@ async function runDueChecks(env) {
     for (const key of page.keys) {
       const schedule = await env.SCHEDULES.get(key.name, 'json');
       if (!schedule) continue;
+      scanned += 1;
 
-      for (const eventName of dueEvents(schedule, now)) {
+      const due = dueEvents(schedule, now);
+      console.log(JSON.stringify({
+        type: 'schedule_check',
+        scheduleId: schedule.scheduleId,
+        departureTime: schedule.departureTime,
+        enabled: schedule.enabled,
+        today,
+        weekday: weekday(parts),
+        days: schedule.days,
+        oneTimeDate: schedule.oneTimeDate,
+        minutesUntilDeparture: due.minutesUntilDeparture,
+        reason: due.reason,
+        events: due.events,
+      }));
+
+      for (const eventName of due.events) {
         if (await alreadyDispatched(env, schedule, eventName, today)) continue;
-        await dispatchSchedule(env, schedule, eventName);
+        const response = await dispatchSchedule(env, schedule, eventName);
+        console.log(JSON.stringify({
+          type: 'netlify_dispatch',
+          scheduleId: schedule.scheduleId,
+          eventName,
+          status: response.status,
+          ok: response.ok,
+        }));
         dispatched += 1;
       }
     }
   } while (cursor);
 
+  console.log(JSON.stringify({ type: 'run_summary', scanned, dispatched, today }));
   return dispatched;
 }
 
