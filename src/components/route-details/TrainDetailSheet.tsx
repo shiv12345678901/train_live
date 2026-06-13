@@ -19,6 +19,8 @@ interface TripData {
   stops: StopInfo[];
 }
 
+const tripStopsCache = new Map<string, TripData>();
+
 interface TrainDetailSheetProps {
   train: TrainDeparture;
   origin: string;
@@ -37,11 +39,29 @@ function cleanName(name: string): string {
 }
 
 export function TrainDetailSheet({ train, origin, destination, originStopId, destinationStopId, onClose }: TrainDetailSheetProps) {
-  const [tripData, setTripData] = useState<TripData | null>(null);
-  const [loading, setLoading] = useState(true);
+  const cacheKey = [
+    originStopId || origin,
+    destinationStopId || destination,
+    train.tripId,
+    train.scheduledTime,
+    train.platform,
+    train.route,
+  ].join('|');
+  const [tripData, setTripData] = useState<TripData | null>(() => tripStopsCache.get(cacheKey) || null);
+  const [loading, setLoading] = useState(!tripStopsCache.has(cacheKey));
   const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
+    const cached = tripStopsCache.get(cacheKey);
+    if (cached) {
+      queueMicrotask(() => {
+        setTripData(cached);
+        setLoading(false);
+      });
+      return;
+    }
+
+    let cancelled = false;
     const fetchStops = async () => {
       try {
         const params = new URLSearchParams({
@@ -56,13 +76,19 @@ export function TrainDetailSheet({ train, origin, destination, originStopId, des
         const res = await fetch(`${API_BASE}/trip-stops?${params}`);
         if (res.ok) {
           const data = await res.json();
-          if (data.stops?.length > 0) setTripData(data);
+          if (data.stops?.length > 0) {
+            tripStopsCache.set(cacheKey, data);
+            if (!cancelled) setTripData(data);
+          }
         }
       } catch { /* ignore */ }
-      setLoading(false);
+      if (!cancelled) setLoading(false);
     };
     fetchStops();
-  }, [destination, destinationStopId, origin, originStopId, train.platform, train.route, train.scheduledTime, train.tripId]);
+    return () => {
+      cancelled = true;
+    };
+  }, [cacheKey, destination, destinationStopId, origin, originStopId, train.platform, train.route, train.scheduledTime, train.tripId]);
 
   if (loading) {
     return <div className="train-detail-mini"><span className="train-detail-mini-loading">Loading stops...</span></div>;

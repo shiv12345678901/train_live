@@ -548,10 +548,7 @@ async function fetchViaTripPlanner(
 
     const transportDest = (transportation.destination || {}) as Record<string, unknown>;
 
-    let legs: JourneyLeg[] | undefined;
-
-    if (selectedMode === 'all' && transitLegs.length > 1) {
-      legs = allLegs.map((leg) => {
+    const legs: JourneyLeg[] = allLegs.map((leg) => {
         const lt = (leg.transportation || {}) as Record<string, unknown>;
         const lp = (lt.product || {}) as Record<string, unknown>;
 
@@ -601,7 +598,6 @@ async function fetchViaTripPlanner(
           isWalking: isWalk,
         };
       });
-    }
 
     const alerts = parseAlerts((journey.infos || []) as Array<Record<string, unknown>>);
     const fareEstimate = estimateFare(originStopId, destinationStopId, scheduledTime);
@@ -619,7 +615,7 @@ async function fetchViaTripPlanner(
       transportType,
       occupancy: 'unknown',
       alerts,
-      legs,
+      legs: legs.length > 0 ? legs : undefined,
       fareEstimate,
     });
   }
