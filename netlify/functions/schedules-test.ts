@@ -1,4 +1,4 @@
-import { handleCors, CORS_HEADERS } from '../../lib/cors';
+import { handleCors } from '../../lib/cors';
 import type { Handler } from '@netlify/functions';
 import { getAlertSchedulesRef, getSettingsRef } from '../../lib/firestore';
 import { sendMessageWithRetry } from '../../lib/telegram';

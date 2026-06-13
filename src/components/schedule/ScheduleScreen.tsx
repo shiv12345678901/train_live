@@ -4,7 +4,7 @@ import { AlertList } from './AlertList';
 import { AlertForm } from './AlertForm';
 import { AlertSummary } from './AlertSummary';
 import { useAppStore } from '@/store/appStore';
-import { toast } from '@/components/shared/Toast';
+import { toast } from '@/components/shared/toastStore';
 import { hapticSuccess } from '@/lib/haptics';
 import type { AlertFormData } from './AlertForm';
 
@@ -19,13 +19,8 @@ export function ScheduleScreen() {
     setPendingAlertPrefill,
     settings,
   } = useAppStore();
-  const [showForm, setShowForm] = useState(Boolean(pendingAlertPrefill));
-
-  useEffect(() => {
-    if (pendingAlertPrefill) {
-      setShowForm(true);
-    }
-  }, [pendingAlertPrefill]);
+  const [showForm, setShowForm] = useState(false);
+  const isFormOpen = showForm || Boolean(pendingAlertPrefill);
 
   useEffect(() => {
     loadAlertSchedules();
@@ -69,10 +64,16 @@ export function ScheduleScreen() {
       days: formData.days,
       oneTimeDate: formData.oneTimeDate,
       enabled: true,
-      fixedReminderMinutes: [20, 15, 10, 5],
-      changeCheckMinutes: [18, 13],
+      fixedReminderMinutes: [25, 20, 10, 5],
+      changeCheckMinutes: [],
       selectedTripId: formData.tripId,
       selectedPlatform: formData.platform,
+      targetRoute: formData.targetRoute,
+      targetDestination: formData.targetDestination,
+      timezone: 'Australia/Sydney',
+      delayRecheckMinutes: 2,
+      fallbackWindowMinutes: 5,
+      notifyOnCancellationImmediately: true,
     });
 
     hapticSuccess();
@@ -92,7 +93,7 @@ export function ScheduleScreen() {
     setPendingAlertPrefill(null);
   };
 
-  if (showForm) {
+  if (isFormOpen) {
     return (
       <div>
         <PageHeader title="New Alert" backButton onBack={handleCancel} />

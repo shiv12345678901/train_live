@@ -21,6 +21,12 @@ export function AlertSummary({ data }: AlertSummaryProps) {
           <span className="alert-summary-label">Departure</span>
           <span className="alert-summary-value">{data.departureTime}</span>
         </div>
+        {data.targetRoute && (
+          <div className="alert-summary-row">
+            <span className="alert-summary-label">Service</span>
+            <span className="alert-summary-value">{data.targetRoute}</span>
+          </div>
+        )}
         {data.platform && (
           <div className="alert-summary-row">
             <span className="alert-summary-label">Platform</span>

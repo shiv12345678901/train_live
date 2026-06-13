@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { StopSearchInput } from './StopSearchInput';
 import { fetchLiveTrains } from '@/api/trainApi';
-import { toast } from '@/components/shared/Toast';
+import { toast } from '@/components/shared/toastStore';
 import { PRESET_STOPS } from '@/data/stops';
 import type { TrainDeparture, TransportMode } from '@/types';
+import { formatTransportTime } from '@/utils/timeUtils';
 
 interface TripPlannerProps {
   onClose: () => void;
@@ -23,6 +24,7 @@ export function TripPlanner({ onClose }: TripPlannerProps) {
   const [results, setResults] = useState<TrainDeparture[]>([]);
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
+  const [searchNow, setSearchNow] = useState(() => Date.now());
 
   const handleSearch = async () => {
     if (!origin.trim() || !destination.trim()) {
@@ -36,6 +38,7 @@ export function TripPlanner({ onClose }: TripPlannerProps) {
 
     setLoading(true);
     setSearched(true);
+    setSearchNow(Date.now());
     try {
       const resolvedOriginId = getStopId(origin.trim(), originStopId);
       const resolvedDestId = getStopId(destination.trim(), destinationStopId);
@@ -98,8 +101,8 @@ export function TripPlanner({ onClose }: TripPlannerProps) {
           {results.map((train, i) => {
             const time = train.estimatedTime || train.scheduledTime;
             const d = new Date(time);
-            const timeStr = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
-            const mins = Math.max(0, Math.round((d.getTime() - Date.now()) / 60000));
+            const timeStr = formatTransportTime(time, '—');
+            const mins = Math.max(0, Math.round((d.getTime() - searchNow) / 60000));
             return (
               <div key={`${train.tripId}-${i}`} className="trip-planner-result">
                 <div className="trip-planner-result-left">
