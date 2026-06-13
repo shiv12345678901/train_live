@@ -3145,3 +3145,109 @@ body {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
+
+/* ─── Schedule Screen – Professional cards/actions ─────────────────── */
+
+.alert-list-item {
+  position: relative;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  border-radius: var(--radius-xl);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.04);
+}
+
+.alert-list-item.is-expanded {
+  border-color: var(--black);
+}
+
+.alert-list-item-main {
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  padding: 0;
+  font: inherit;
+}
+
+.alert-list-item-route {
+  margin-top: 3px;
+  font-size: 12px;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.alert-list-detail {
+  width: 100%;
+  padding-top: var(--space-md);
+  margin-top: var(--space-md);
+  border-top: 1px solid var(--border);
+}
+
+.alert-list-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-sm);
+  margin-bottom: var(--space-md);
+}
+
+.alert-list-detail-grid > div,
+.alert-list-activity {
+  background: var(--panel);
+  border-radius: var(--radius-md);
+  padding: var(--space-md);
+}
+
+.alert-detail-label {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 4px;
+}
+
+.alert-list-detail-grid strong {
+  font-size: 13px;
+  color: var(--text);
+}
+
+.alert-list-activity p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.alert-list-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  margin-top: var(--space-md);
+}
+
+.alert-detail-btn {
+  flex: 1 1 120px;
+  min-height: 40px;
+}
+
+.alert-detail-btn.is-sending::before {
+  content: '';
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.45);
+  border-top-color: var(--white);
+  border-radius: 999px;
+  display: inline-block;
+  margin-right: 8px;
+  vertical-align: -2px;
+  animation: spin 0.8s linear infinite;
+}
+
+.train-card-bell-icon.is-scheduled {
+  background: var(--success);
+}
+
+.train-card-bell-icon.is-scheduled:active {
+  background: var(--success);
+}
