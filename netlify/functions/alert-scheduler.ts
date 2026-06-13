@@ -390,6 +390,38 @@ function formatReminderMessage(opts: {
   return lines.join('\n');
 }
 
+
+function formatAvailabilityMessage(opts: {
+  title: string;
+  origin: string;
+  destination: string;
+  departureTime: string;
+  train: LiveTrain | null;
+}): string {
+  const { title, origin, destination, departureTime, train } = opts;
+  const lines: string[] = [
+    `✅ <b>${title} — Watch started</b>`,
+    ``,
+    `${shortStop(origin)} → ${shortStop(destination)}`,
+    `Target departure: <b>${formatTime12h(departureTime)}</b>`,
+  ];
+
+  if (train) {
+    lines.push(``, trainLine(train));
+    if (train.cancelled) {
+      lines.push(`❌ Currently cancelled — checking replacement options.`);
+    } else if (train.status === 'delayed' && train.delayMinutes) {
+      lines.push(`⚠️ Currently delayed ${train.delayMinutes} min`);
+    } else {
+      lines.push(`Available. Reminders will continue at 25, 20, 10 and 5 min when applicable.`);
+    }
+  } else {
+    lines.push(``, `No matching service found yet. I will keep checking until departure.`);
+  }
+
+  return lines.join('\n');
+}
+
 function formatCancellationMessage(opts: {
   title: string;
   origin: string;
@@ -526,6 +558,25 @@ const schedulerHandler: Handler = async () => {
         });
 
         await updateDeliveryState(userId, scheduleId, watch);
+
+        if (minsUntilDeparture >= -0.5 && minsUntilDeparture <= maxWatchMinutes + 1) {
+          const activeKey = watch.active?.tripId || watch.active?.scheduledTime || 'unknown';
+          const sentKey = `${scheduleId}:${todayKey}:availability:${activeKey}`;
+          await sendReservedMessage({
+            userId,
+            scheduleId,
+            sentKey,
+            botToken,
+            chatId,
+            message: formatAvailabilityMessage({
+              title: String(alert.title || 'Train Alert'),
+              origin: routeInfo.origin,
+              destination: routeInfo.destination,
+              departureTime,
+              train: watch.active,
+            }),
+          });
+        }
 
         if (watch.target?.cancelled && alert.notifyOnCancellationImmediately !== false) {
           const sentKey = `${scheduleId}:${todayKey}:cancelled:${watch.target.tripId || watch.target.scheduledTime}`;
