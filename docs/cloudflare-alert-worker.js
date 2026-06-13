@@ -76,7 +76,12 @@ async function alreadyDispatched(env, schedule, eventName, today) {
 }
 
 async function dispatchSchedule(env, schedule, eventName) {
-  const url = new URL('/.netlify/functions/alert-scheduler-run', env.NETLIFY_SITE_URL);
+  const siteUrl = String(env.NETLIFY_SITE_URL || '').trim().replace(/\/+$/, '');
+  if (!siteUrl || !siteUrl.startsWith('https://')) {
+    throw new Error('NETLIFY_SITE_URL must be set to a full https URL, for example https://sydneytrain.netlify.app');
+  }
+
+  const url = new URL('/.netlify/functions/alert-scheduler-run', siteUrl);
   url.searchParams.set('userId', schedule.userId);
   url.searchParams.set('scheduleId', schedule.scheduleId);
   url.searchParams.set('event', eventName);
