@@ -496,7 +496,20 @@ async function sendReservedMessage(opts: {
   const { userId, scheduleId, sentKey, botToken, chatId, message } = opts;
   if (!await reserveSentKey(userId, scheduleId, sentKey)) return false;
   const sent = await sendMessageWithRetry(botToken, chatId, message);
-  if (!sent) await releaseSentKey(userId, scheduleId, sentKey);
+  if (!sent) {
+    await releaseSentKey(userId, scheduleId, sentKey);
+    return false;
+  }
+
+  await getAlertDeliveryStateRef(userId).doc(scheduleId).set({
+    activity: FieldValue.arrayUnion({
+      sentAt: new Date().toISOString(),
+      sentKey,
+      message,
+      source: 'scheduler',
+    }),
+    updatedAt: new Date().toISOString(),
+  }, { merge: true });
   return sent;
 }
 

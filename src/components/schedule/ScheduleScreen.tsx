@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { AlertList } from './AlertList';
+import type { ScheduleFilter } from './AlertList';
 import { AlertForm } from './AlertForm';
 import { AlertSummary } from './AlertSummary';
 import { useAppStore } from '@/store/appStore';
@@ -22,6 +23,7 @@ export function ScheduleScreen() {
   const [showForm, setShowForm] = useState(false);
   const [editingScheduleId, setEditingScheduleId] = useState<string | null>(null);
   const [expandedScheduleId, setExpandedScheduleId] = useState<string | null>(null);
+  const [filter, setFilter] = useState<ScheduleFilter>('active');
   const editingSchedule = editingScheduleId ? alertSchedules.find((schedule) => schedule.id === editingScheduleId) || null : null;
   const isFormOpen = showForm || Boolean(pendingAlertPrefill) || Boolean(editingSchedule);
 
@@ -127,12 +129,39 @@ export function ScheduleScreen() {
     <div>
       <PageHeader title="Schedule" />
       <div className="schedule-content">
+        <div className="scheduler-health">
+          <div>
+            <span className="scheduler-health-label">Scheduler</span>
+            <strong>Cloudflare active</strong>
+          </div>
+          <div>
+            <span className="scheduler-health-label">Cadence</span>
+            <strong>Every 1 min</strong>
+          </div>
+          <div>
+            <span className="scheduler-health-label">Schedules</span>
+            <strong>{alertSchedules.filter((schedule) => schedule.enabled).length} active</strong>
+          </div>
+        </div>
         <button className="btn-primary schedule-new-btn" onClick={() => setShowForm(true)}>
           New Alert
         </button>
+        <div className="schedule-filter-tabs" role="tablist" aria-label="Schedule filters">
+          {(['active', 'today', 'paused', 'one-time', 'recurring', 'completed'] as ScheduleFilter[]).map((item) => (
+            <button
+              key={item}
+              className={`schedule-filter-tab ${filter === item ? 'is-active' : ''}`}
+              type="button"
+              onClick={() => setFilter(item)}
+            >
+              {item.replace('-', ' ')}
+            </button>
+          ))}
+        </div>
         <AlertList
           schedules={alertSchedules}
           routeCards={routeCards}
+          filter={filter}
           expandedId={expandedScheduleId}
           onExpand={setExpandedScheduleId}
           onEdit={(schedule) => { setEditingScheduleId(schedule.id); setShowForm(true); }}

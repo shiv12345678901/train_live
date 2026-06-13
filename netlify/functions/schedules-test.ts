@@ -1,6 +1,7 @@
 import { handleCors } from '../../lib/cors';
 import type { Handler } from '@netlify/functions';
-import { getAlertSchedulesRef, getSettingsRef } from '../../lib/firestore';
+import { FieldValue } from 'firebase-admin/firestore';
+import { getAlertDeliveryStateRef, getAlertSchedulesRef, getSettingsRef } from '../../lib/firestore';
 import { sendMessageWithRetry } from '../../lib/telegram';
 import { parseJsonObject } from '../../lib/validation';
 
@@ -23,8 +24,8 @@ const handler: Handler = async (event) => {
       };
     }
 
-    // Read the schedule to get route details for the test message
-    const scheduleDoc = await getAlertSchedulesRef(userId).doc(scheduleId.trim()).get();
+    const cleanScheduleId = scheduleId.trim();
+    const scheduleDoc = await getAlertSchedulesRef(userId).doc(cleanScheduleId).get();
     if (!scheduleDoc.exists) {
       return {
         statusCode: 404,
@@ -32,7 +33,6 @@ const handler: Handler = async (event) => {
       };
     }
 
-    // Read Telegram bot token and chat ID from user settings
     const settingsDoc = await getSettingsRef(userId).get();
     const settings = settingsDoc.data();
 
@@ -50,31 +50,39 @@ const handler: Handler = async (event) => {
 
     const schedule = scheduleDoc.data();
     const testMessage = [
-      `✅ <b>Test Alert</b>`,
-      ``,
-      `This is a test message for: <b>${schedule?.title || 'Unknown'}</b>`,
-      `Departure: ${schedule?.departureTime || 'N/A'}`,
-      ``,
-      `Your alerts are working correctly!`,
+      `${schedule?.title || 'Saved route'}`,
+      `At: ${schedule?.departureTime || 'N/A'}`,
+      `Platform: ${schedule?.selectedPlatform || 'TBC'}`,
+      `Alert: Test message sent successfully`,
     ].join('\n');
 
-    const success = await sendMessageWithRetry(
-      botToken,
-      chatId,
-      testMessage
-    );
+    const success = await sendMessageWithRetry(botToken, chatId, testMessage);
 
     if (success) {
+      await getAlertDeliveryStateRef(userId).doc(cleanScheduleId).set({
+        activity: FieldValue.arrayUnion({
+          sentAt: new Date().toISOString(),
+          sentKey: `test:${Date.now()}`,
+          message: testMessage,
+          source: 'test',
+        }),
+        updatedAt: new Date().toISOString(),
+      }, { merge: true });
+
       return {
         statusCode: 200,
-        body: JSON.stringify({ success: true, message: 'Test message sent successfully', credentialSource: settings?.telegramBotToken && settings?.telegramChatId ? 'settings' : 'environment' }),
-      };
-    } else {
-      return {
-        statusCode: 502,
-        body: JSON.stringify({ success: false, error: 'Failed to send test message via Telegram' }),
+        body: JSON.stringify({
+          success: true,
+          message: 'Test message sent successfully',
+          credentialSource: settings?.telegramBotToken && settings?.telegramChatId ? 'settings' : 'environment',
+        }),
       };
     }
+
+    return {
+      statusCode: 502,
+      body: JSON.stringify({ success: false, error: 'Failed to send test message via Telegram' }),
+    };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to send test alert';
     return { statusCode: 500, body: JSON.stringify({ error: message }) };

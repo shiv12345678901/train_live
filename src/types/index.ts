@@ -37,6 +37,8 @@ export type AlertSchedule = {
   delayRecheckMinutes?: number;
   fallbackWindowMinutes?: number;
   notifyOnCancellationImmediately?: boolean;
+  deliveryState?: AlertDeliveryState;
+  cloudflareIndexed?: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -99,10 +101,22 @@ export type ServiceAlert = {
 export type AlertDeliveryState = {
   alertScheduleId: string;
   sentKeys: string[];
+  updatedAt?: string;
+  activity?: {
+    sentAt: string;
+    sentKey: string;
+    message: string;
+    source?: 'scheduler' | 'test';
+  }[];
   lastKnownTripState?: {
+    tripId?: string;
+    route?: string;
+    destination?: string;
     estimatedTime?: string;
     platform?: string;
     status?: string;
+    replacementTripId?: string;
+    replacementScheduledTime?: string;
     alertsHash?: string;
   };
 };
