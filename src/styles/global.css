@@ -1039,54 +1039,6 @@ body {
   flex-wrap: wrap;
 }
 
-.train-card-journey-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-  align-items: center;
-  gap: 10px;
-  margin: 10px 0 0;
-  padding: 10px 0 0;
-  border-top: 1px solid var(--border);
-}
-
-.train-card-journey-stop {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.train-card-journey-stop strong {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 12px;
-  font-weight: 800;
-  color: var(--text);
-}
-
-.train-card-journey-stop span {
-  font-size: 11px;
-  font-weight: 650;
-  color: var(--muted);
-}
-
-.train-card-journey-stop.is-destination {
-  text-align: right;
-}
-
-.train-card-journey-duration {
-  min-width: 54px;
-  padding: 5px 8px;
-  border-radius: var(--radius-full);
-  background: var(--panel);
-  font-size: 11px;
-  font-weight: 800;
-  color: var(--text);
-  text-align: center;
-}
-
 .train-card-occupancy {
   display: flex;
   align-items: center;

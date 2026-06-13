@@ -63,35 +63,6 @@ function TripDuration({ train }: { train: TrainDeparture }) {
   return null;
 }
 
-function JourneyMiniRow({ train }: { train: TrainDeparture }) {
-  const legs = train.legs || [];
-  if (legs.length === 0) return null;
-
-  const firstLeg = legs[0];
-  const lastLeg = legs[legs.length - 1];
-  const totalMinutes = legs.reduce((sum, leg) => sum + leg.durationMinutes, 0);
-  const originTime = firstLeg.estimatedDeparture || firstLeg.scheduledDeparture;
-  const destinationTime = lastLeg.estimatedArrival || lastLeg.scheduledArrival;
-
-  if (!firstLeg.origin || !lastLeg.destination || !originTime || !destinationTime || totalMinutes <= 0) {
-    return null;
-  }
-
-  return (
-    <div className="train-card-journey-row">
-      <span className="train-card-journey-stop">
-        <strong>{firstLeg.origin.replace(/\s*Station\s*/gi, '')}</strong>
-        <span>{formatTime(originTime)}</span>
-      </span>
-      <span className="train-card-journey-duration">{totalMinutes} min</span>
-      <span className="train-card-journey-stop is-destination">
-        <strong>{lastLeg.destination.replace(/\s*Station\s*/gi, '')}</strong>
-        <span>{formatTime(destinationTime)}</span>
-      </span>
-    </div>
-  );
-}
-
 // ─── Multi-leg Journey Display ───────────────────────────────────────
 
 function MultiLegSummary({ legs }: { legs: TrainDeparture['legs'] }) {
@@ -297,8 +268,6 @@ export function TrainCard({ train, onBellTap, onTap, isScheduled = false }: Trai
         )}
         <AlertChips alerts={train.alerts} />
       </div>
-      <JourneyMiniRow train={train} />
-      
       {hasMultiLeg && <MultiLegSummary legs={train.legs} />}
     </div>
   );
