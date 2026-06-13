@@ -6,7 +6,6 @@ import { testAlert } from '@/api/scheduleApi';
 interface AlertListProps {
   schedules: AlertSchedule[];
   routeCards: RouteCard[];
-  telegramConfigured: boolean;
   expandedId?: string | null;
   onExpand: (id: string | null) => void;
   onEdit: (schedule: AlertSchedule) => void;
@@ -21,16 +20,24 @@ function formatDays(schedule: AlertSchedule): string {
   if (schedule.days.length === 0) return 'No repeat days';
   if (schedule.days.length === 5 && [1, 2, 3, 4, 5].every((day) => schedule.days.includes(day))) return 'Weekdays';
   if (schedule.days.length === 7) return 'Daily';
-  return schedule.days.map((d) => DAY_LABELS[d]).join(', ');
+  return schedule.days.map((day) => DAY_LABELS[day]).join(', ');
 }
 
 function routeLabel(schedule: AlertSchedule, routeCards: RouteCard[]): string {
   const route = routeCards.find((card) => card.id === schedule.routeCardId);
   if (!route) return 'Saved route';
-  return `${route.origin.replace(/\s*Station\s*/gi, '')} → ${route.destination.replace(/\s*Station\s*/gi, '')}`;
+  return `${route.origin.replace(/\s*Station\s*/gi, '')} -> ${route.destination.replace(/\s*Station\s*/gi, '')}`;
 }
 
-export function AlertList({ schedules, routeCards, telegramConfigured, expandedId, onExpand, onEdit }: AlertListProps) {
+function sendStatusText(status: SendState, isLocal: boolean): string {
+  if (isLocal) return 'Save online before testing Telegram.';
+  if (status === 'sending') return 'Sending test message...';
+  if (status === 'sent') return 'Test message sent.';
+  if (status === 'error') return 'Test failed. Check Telegram settings and Netlify logs.';
+  return 'Send a test Telegram message now without waiting for the schedule.';
+}
+
+export function AlertList({ schedules, routeCards, expandedId, onExpand, onEdit }: AlertListProps) {
   const { toggleAlertSchedule, deleteAlertSchedule } = useAppStore();
   const [sendState, setSendState] = useState<Record<string, SendState>>({});
 
@@ -56,8 +63,8 @@ export function AlertList({ schedules, routeCards, telegramConfigured, expandedI
       window.setTimeout(() => {
         setSendState((state) => ({ ...state, [id]: 'idle' }));
       }, 2500);
-    } catch (e) {
-      console.error('Send now failed', e);
+    } catch (error) {
+      console.error('Send now failed', error);
       setSendState((state) => ({ ...state, [id]: 'error' }));
     }
   };
@@ -66,7 +73,7 @@ export function AlertList({ schedules, routeCards, telegramConfigured, expandedI
     return (
       <div className="alert-list-empty">
         <p>No alerts scheduled yet.</p>
-        <p className="alert-list-empty-hint">Tap “New Alert” or use the bell on a train card to watch a service.</p>
+        <p className="alert-list-empty-hint">Tap "New Alert" or use the bell on a train card to watch a service.</p>
       </div>
     );
   }
@@ -76,6 +83,7 @@ export function AlertList({ schedules, routeCards, telegramConfigured, expandedI
       {[...schedules].sort((a, b) => a.departureTime.localeCompare(b.departureTime)).map((schedule) => {
         const isExpanded = expandedId === schedule.id;
         const status = sendState[schedule.id] || 'idle';
+        const isLocal = schedule.id.startsWith('local-');
         const meta = [schedule.targetRoute, schedule.selectedPlatform ? `Platform ${schedule.selectedPlatform}` : ''].filter(Boolean).join(' • ');
 
         return (
@@ -114,30 +122,28 @@ export function AlertList({ schedules, routeCards, telegramConfigured, expandedI
                   </div>
                   <div>
                     <span className="alert-detail-label">Fallback</span>
-                    <strong>±{schedule.fallbackWindowMinutes || 5} min replacement</strong>
+                    <strong>+/-{schedule.fallbackWindowMinutes || 5} min replacement</strong>
                   </div>
                   <div>
                     <span className="alert-detail-label">Status</span>
                     <strong>{schedule.enabled ? 'Active' : 'Paused'}</strong>
                   </div>
                 </div>
-                <div className="alert-list-activity">
-                  <span className="alert-detail-label">Activity</span>
-                  <p>Telegram checks are handled by the scheduler. Use “Send now” to verify your bot/channel setup immediately.</p>
+                <div className={`alert-list-activity alert-list-activity-${status}`}>
+                  <span className="alert-detail-label">Test</span>
+                  <p>{sendStatusText(status, isLocal)}</p>
                 </div>
                 <div className="alert-list-detail-actions">
                   <button className="btn-secondary alert-detail-btn" type="button" onClick={() => onEdit(schedule)}>Edit</button>
-                  {telegramConfigured && (
-                    <button
-                      className={`btn-primary alert-detail-btn ${status === 'sending' ? 'is-sending' : ''}`}
-                      type="button"
-                      onClick={() => handleSendNow(schedule.id)}
-                      disabled={status === 'sending'}
-                    >
-                      {status === 'sending' ? 'Sending…' : status === 'sent' ? 'Sent' : status === 'error' ? 'Try again' : 'Send now'}
-                    </button>
-                  )}
-                  <button className="alert-list-item-delete-btn" onClick={() => handleDelete(schedule.id)} title="Delete alert" type="button">Delete</button>
+                  <button
+                    className={`btn-primary alert-detail-btn ${status === 'sending' ? 'is-sending' : ''}`}
+                    type="button"
+                    onClick={() => handleSendNow(schedule.id)}
+                    disabled={status === 'sending' || isLocal}
+                  >
+                    {status === 'sending' ? 'Sending...' : status === 'sent' ? 'Sent' : status === 'error' ? 'Try again' : 'Send now'}
+                  </button>
+                  <button className="alert-list-item-delete-btn alert-detail-delete-btn" onClick={() => handleDelete(schedule.id)} title="Delete alert" type="button">Delete</button>
                 </div>
               </div>
             )}

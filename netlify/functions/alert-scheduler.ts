@@ -137,7 +137,7 @@ function formatIsoSydneyTime(isoTime?: string): string {
 }
 
 function isWithinWindow(minutesUntilDeparture: number, targetMinutes: number): boolean {
-  return minutesUntilDeparture >= targetMinutes - 0.5 && minutesUntilDeparture < targetMinutes + 0.5;
+  return minutesUntilDeparture >= targetMinutes - 1.5 && minutesUntilDeparture < targetMinutes + 0.5;
 }
 
 function cleanName(name: string): string {

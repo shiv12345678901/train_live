@@ -18,7 +18,6 @@ export function ScheduleScreen() {
     updateAlertSchedule,
     pendingAlertPrefill,
     setPendingAlertPrefill,
-    settings,
   } = useAppStore();
   const [showForm, setShowForm] = useState(false);
   const [editingScheduleId, setEditingScheduleId] = useState<string | null>(null);
@@ -134,7 +133,6 @@ export function ScheduleScreen() {
         <AlertList
           schedules={alertSchedules}
           routeCards={routeCards}
-          telegramConfigured={settings.telegramConnected}
           expandedId={expandedScheduleId}
           onExpand={setExpandedScheduleId}
           onEdit={(schedule) => { setEditingScheduleId(schedule.id); setShowForm(true); }}
