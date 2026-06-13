@@ -171,9 +171,28 @@ function destinationMatches(trainDestination: string, targetDestination?: string
 
 function extractPlatform(originInfo: ApiRecord): string {
   const props = (originInfo.properties || {}) as Record<string, string>;
-  const platformName = props.plannedPlatformName || props.platformName || String(originInfo.disassembledName || '');
-  const match = platformName.match(/(platform\s*)?(\d+|[A-Z])$/i);
-  return match ? match[2] : platformName;
+  const platformName = props.plannedPlatformName || props.platformName || '';
+  if (platformName) {
+    const match = platformName.match(/(\d+|[A-Z])$/i);
+    return match ? match[1] : platformName;
+  }
+
+  const stoppingPoint = props.stoppingPointPlanned || '';
+  if (stoppingPoint) {
+    const match = stoppingPoint.match(/(\d+|[A-Z])$/i);
+    return match ? match[1] : '';
+  }
+
+  const disassembled = String(originInfo.disassembledName || '');
+  const platMatch = disassembled.match(/[Pp]latform\s*(\d+|[A-Z])/);
+  if (platMatch) return platMatch[1];
+
+  const area = props.area || '';
+  if (area && /^\d+$/.test(area) && Number(area) > 0 && Number(area) <= 30) {
+    return area;
+  }
+
+  return '';
 }
 
 function parseServiceAlerts(infos: ApiRecord[]): ServiceAlert[] {
@@ -288,9 +307,70 @@ async function fetchTrainCandidates(options: ResolveOptions): Promise<LiveTrain[
       });
     }
 
-    return candidates.sort((a, b) => Math.abs(a.diffMinutes) - Math.abs(b.diffMinutes));
+    const enriched = await enrichPlatformsFromDepartureMonitor(candidates, options);
+    return enriched.sort((a, b) => Math.abs(a.diffMinutes) - Math.abs(b.diffMinutes));
   } catch {
     return [];
+  }
+}
+
+async function enrichPlatformsFromDepartureMonitor(candidates: LiveTrain[], options: ResolveOptions): Promise<LiveTrain[]> {
+  if (candidates.length === 0) return candidates;
+
+  try {
+    const dmType = options.originStopId ? 'stop' : 'any';
+    const dmName = options.originStopId || options.origin;
+    const dmUrl = `https://api.transport.nsw.gov.au/v1/tp/departure_mon` +
+      `?outputFormat=rapidJSON` +
+      `&coordOutputFormat=EPSG%3A4326` +
+      `&mode=direct` +
+      `&type_dm=${dmType}` +
+      `&name_dm=${encodeURIComponent(dmName)}` +
+      `&departureMonitorMacro=true` +
+      `&TfNSWDM=true` +
+      `&version=10.2.1.42` +
+      `&limit=80`;
+
+    const res = await fetchWithTimeout(dmUrl, { headers: { Authorization: `apikey ${options.apiKey}` } });
+    if (!res.ok) return candidates;
+
+    const data = (await res.json()) as ApiRecord;
+    const events = ((data.stopEvents || []) as ApiRecord[]).map((event) => {
+      const transportation = (event.transportation || {}) as ApiRecord;
+      const destination = (transportation.destination || {}) as ApiRecord;
+      return {
+        tripId: String(transportation.id || ''),
+        route: String(transportation.disassembledName || transportation.number || ''),
+        destination: String(destination.name || '').replace(/,.*$/, ''),
+        scheduledTime: String(event.departureTimePlanned || ''),
+        estimatedTime: String(event.departureTimeEstimated || '') || undefined,
+        platform: extractPlatform((event.location || {}) as ApiRecord),
+        cancelled: event.isCancelled === true,
+        alerts: parseServiceAlerts((event.infos || []) as ApiRecord[]),
+      };
+    });
+
+    return candidates.map((candidate) => {
+      const match = events.find((event) => {
+        const sameTrip = candidate.tripId && event.tripId && candidate.tripId === event.tripId;
+        const timeDiff = Math.abs(new Date(event.scheduledTime).getTime() - new Date(candidate.scheduledTime).getTime()) / 60000;
+        const sameService = timeDiff <= 2 &&
+          routeMatches(event.route, candidate.route) &&
+          destinationMatches(event.destination || candidate.destination, candidate.destination || options.destination);
+        return sameTrip || sameService;
+      });
+
+      if (!match) return candidate;
+      return {
+        ...candidate,
+        platform: match.platform || candidate.platform,
+        estimatedTime: match.estimatedTime || candidate.estimatedTime,
+        cancelled: match.cancelled || candidate.cancelled,
+        alerts: match.alerts.length > 0 ? match.alerts : candidate.alerts,
+      };
+    });
+  } catch {
+    return candidates;
   }
 }
 
@@ -377,8 +457,8 @@ function trainTime(train: LiveTrain | null, fallbackTime: string): string {
   return train ? formatIsoSydneyTime(train.estimatedTime || train.scheduledTime) : formatTime12h(fallbackTime);
 }
 
-function trainPlatform(train: LiveTrain | null): string {
-  return train?.platform || 'TBC';
+function trainPlatform(train: LiveTrain | null, fallbackPlatform = ''): string {
+  return train?.platform || fallbackPlatform || 'TBC';
 }
 
 function standardMessage(opts: {
@@ -417,14 +497,15 @@ function formatReminderMessage(opts: {
   departureTime: string;
   offsetMinutes: number;
   train: LiveTrain | null;
+  fallbackPlatform?: string;
 }): string {
-  const { origin, destination, departureTime, train } = opts;
+  const { origin, destination, departureTime, train, fallbackPlatform } = opts;
 
   return standardMessage({
     origin,
     destination,
     time: trainTime(train, departureTime),
-    platform: trainPlatform(train),
+    platform: trainPlatform(train, fallbackPlatform),
     alert: serviceAlertText(train),
   });
 }
@@ -436,14 +517,15 @@ function formatAvailabilityMessage(opts: {
   destination: string;
   departureTime: string;
   train: LiveTrain | null;
+  fallbackPlatform?: string;
 }): string {
-  const { origin, destination, departureTime, train } = opts;
+  const { origin, destination, departureTime, train, fallbackPlatform } = opts;
 
   return standardMessage({
     origin,
     destination,
     time: trainTime(train, departureTime),
-    platform: trainPlatform(train),
+    platform: trainPlatform(train, fallbackPlatform),
     alert: serviceAlertText(train),
   });
 }
@@ -454,17 +536,18 @@ function formatCancellationMessage(opts: {
   destination: string;
   target: LiveTrain;
   replacement: LiveTrain | null;
+  fallbackPlatform?: string;
 }): string {
-  const { origin, destination, target, replacement } = opts;
+  const { origin, destination, target, replacement, fallbackPlatform } = opts;
   const alert = serviceAlertText(target) || (replacement
-    ? `Cancelled. Replacement at ${formatIsoSydneyTime(replacement.estimatedTime || replacement.scheduledTime)} on platform ${trainPlatform(replacement)}`
+    ? `Cancelled. Replacement at ${formatIsoSydneyTime(replacement.estimatedTime || replacement.scheduledTime)} on platform ${trainPlatform(replacement, fallbackPlatform)}`
     : 'Cancelled. No close replacement found');
 
   return standardMessage({
     origin,
     destination,
     time: trainTime(target, target.scheduledTime),
-    platform: trainPlatform(target),
+    platform: trainPlatform(target, fallbackPlatform),
     alert,
   });
 }
@@ -474,13 +557,14 @@ function formatDelayMessage(opts: {
   origin: string;
   destination: string;
   train: LiveTrain;
+  fallbackPlatform?: string;
 }): string {
-  const { origin, destination, train } = opts;
+  const { origin, destination, train, fallbackPlatform } = opts;
   return standardMessage({
     origin,
     destination,
     time: trainTime(train, train.scheduledTime),
-    platform: trainPlatform(train),
+    platform: trainPlatform(train, fallbackPlatform),
     alert: serviceAlertText(train),
   });
 }
@@ -568,12 +652,13 @@ export async function runAlertSchedulerForSchedule(userId: string, scheduleId: s
   const freshSentKeys = sentKeys.filter((key) => key.includes(todayKey));
   if (freshSentKeys.length < sentKeys.length) await deliveryRef.set({ sentKeys: freshSentKeys }, { merge: true });
 
+  const selectedPlatform = String(alert.selectedPlatform || '');
   const watch = await resolveWatchedTrain({
     apiKey,
     ...routeInfo,
     departureDate,
     selectedTripId: String(alert.selectedTripId || ''),
-    selectedPlatform: String(alert.selectedPlatform || ''),
+    selectedPlatform,
     targetRoute: String(alert.targetRoute || ''),
     targetDestination: String(alert.targetDestination || routeInfo.destination),
     fallbackWindowMinutes,
@@ -596,6 +681,7 @@ export async function runAlertSchedulerForSchedule(userId: string, scheduleId: s
         destination: routeInfo.destination,
         departureTime,
         train: watch.active,
+        fallbackPlatform: selectedPlatform,
       }),
     });
   }
@@ -614,6 +700,7 @@ export async function runAlertSchedulerForSchedule(userId: string, scheduleId: s
         destination: routeInfo.destination,
         target: watch.target,
         replacement: watch.replacement,
+        fallbackPlatform: selectedPlatform,
       }),
     });
   }
@@ -637,6 +724,7 @@ export async function runAlertSchedulerForSchedule(userId: string, scheduleId: s
         departureTime,
         offsetMinutes: offset,
         train: activeTrain,
+        fallbackPlatform: selectedPlatform,
       }),
     });
   }
@@ -661,6 +749,7 @@ export async function runAlertSchedulerForSchedule(userId: string, scheduleId: s
         origin: routeInfo.origin,
         destination: routeInfo.destination,
         train: activeTrain,
+        fallbackPlatform: selectedPlatform,
       }),
     });
   }
@@ -719,12 +808,13 @@ export const runAlertScheduler: Handler = async () => {
         const freshSentKeys = sentKeys.filter((key) => key.includes(todayKey));
         if (freshSentKeys.length < sentKeys.length) await deliveryRef.set({ sentKeys: freshSentKeys }, { merge: true });
 
+        const selectedPlatform = String(alert.selectedPlatform || '');
         const watch = await resolveWatchedTrain({
           apiKey,
           ...routeInfo,
           departureDate,
           selectedTripId: String(alert.selectedTripId || ''),
-          selectedPlatform: String(alert.selectedPlatform || ''),
+          selectedPlatform,
           targetRoute: String(alert.targetRoute || ''),
           targetDestination: String(alert.targetDestination || routeInfo.destination),
           fallbackWindowMinutes,
@@ -747,6 +837,7 @@ export const runAlertScheduler: Handler = async () => {
               destination: routeInfo.destination,
               departureTime,
               train: watch.active,
+              fallbackPlatform: selectedPlatform,
             }),
           });
         }
@@ -765,6 +856,7 @@ export const runAlertScheduler: Handler = async () => {
               destination: routeInfo.destination,
               target: watch.target,
               replacement: watch.replacement,
+              fallbackPlatform: selectedPlatform,
             }),
           });
         }
@@ -788,6 +880,7 @@ export const runAlertScheduler: Handler = async () => {
               departureTime,
               offsetMinutes: offset,
               train: activeTrain,
+              fallbackPlatform: selectedPlatform,
             }),
           });
         }
@@ -812,6 +905,7 @@ export const runAlertScheduler: Handler = async () => {
               origin: routeInfo.origin,
               destination: routeInfo.destination,
               train: activeTrain,
+              fallbackPlatform: selectedPlatform,
             }),
           });
         }
