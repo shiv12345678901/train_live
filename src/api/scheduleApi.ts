@@ -49,8 +49,8 @@ export async function deleteSchedule(id: string): Promise<void> {
  * Send a test alert for an existing schedule.
  * Uses the schedule's configuration to send a test message via Telegram.
  */
-export async function testAlert(scheduleId: string): Promise<void> {
-  await requestVoid('/schedules-test', {
+export async function testAlert(scheduleId: string): Promise<{ success: boolean; message?: string }> {
+  return requestJson<{ success: boolean; message?: string }>('/schedules-test', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ scheduleId }),
