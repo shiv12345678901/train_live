@@ -32,9 +32,10 @@ const handler: Handler = async (event, context) => {
 
   const userId = event.queryStringParameters?.userId || 'default-user';
   const scheduleId = event.queryStringParameters?.scheduleId;
+  const eventName = event.queryStringParameters?.event;
   if (scheduleId) {
-    await runAlertSchedulerForSchedule(userId, scheduleId);
-    return json(200, { ok: true, userId, scheduleId });
+    await runAlertSchedulerForSchedule(userId, scheduleId, eventName);
+    return json(200, { ok: true, userId, scheduleId, event: eventName || null });
   }
 
   const response = await runAlertScheduler(event, context);

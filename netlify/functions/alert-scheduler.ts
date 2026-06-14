@@ -151,6 +151,25 @@ function isWithinWindow(minutesUntilDeparture: number, targetMinutes: number): b
   return minutesUntilDeparture >= targetMinutes - 1.5 && minutesUntilDeparture < targetMinutes + 0.5;
 }
 
+function fixedOffsetFromEvent(eventName?: string): number | null {
+  const match = String(eventName || '').match(/^fixed-(\d+)$/);
+  if (!match) return null;
+  const offset = Number(match[1]);
+  return Number.isFinite(offset) ? offset : null;
+}
+
+function dueFixedOffsets(
+  minutesUntilDeparture: number,
+  fixedOffsets: number[],
+  eventName?: string
+): number[] {
+  const eventOffset = fixedOffsetFromEvent(eventName);
+  if (eventOffset !== null && fixedOffsets.includes(eventOffset)) {
+    return [eventOffset];
+  }
+  return fixedOffsets.filter((offset) => isWithinWindow(minutesUntilDeparture, offset));
+}
+
 function cleanName(name: string): string {
   return name.toLowerCase().replace(/\s*(station|wharf|light rail)\s*/gi, '').replace(/,.*$/, '').trim();
 }
@@ -637,7 +656,9 @@ function formatReminderMessage(opts: {
     destination,
     time: trainTime(train, departureTime),
     platform: trainPlatform(train, fallbackPlatform),
-    alert: serviceAlertText(train),
+    alert: serviceAlertText(train) || (!train
+      ? 'TfNSW did not return matching live train data. This alert will keep checking.'
+      : undefined),
     status: statusText(train),
     primary: train,
     others: sortedSummaryTrains(watch),
@@ -732,7 +753,11 @@ async function routeInfoForSchedule(userId: string, routeCardId: string): Promis
   };
 }
 
-export async function runAlertSchedulerForSchedule(userId: string, scheduleId: string): Promise<void> {
+export async function runAlertSchedulerForSchedule(
+  userId: string,
+  scheduleId: string,
+  eventName?: string
+): Promise<void> {
   const apiKey = process.env.TFN_API_KEY;
   if (!apiKey) return;
 
@@ -810,10 +835,8 @@ export async function runAlertSchedulerForSchedule(userId: string, scheduleId: s
 
   const activeTrain = watch.active;
 
-  for (const offset of fixedOffsets) {
-    if (!isWithinWindow(minsUntilDeparture, offset)) continue;
-    if (!activeTrain) continue;
-    const trainKey = activeTrain?.tripId || activeTrain?.scheduledTime || 'unknown';
+  for (const offset of dueFixedOffsets(minsUntilDeparture, fixedOffsets, eventName)) {
+    const trainKey = activeTrain?.tripId || activeTrain?.scheduledTime || 'live-unavailable';
     const sentKey = `${scheduleId}:${todayKey}:fixed-${offset}:${trainKey}`;
     await sendReservedMessage({
       userId,
@@ -947,10 +970,8 @@ export const runAlertScheduler: Handler = async () => {
 
         const activeTrain = watch.active;
 
-        for (const offset of fixedOffsets) {
-          if (!isWithinWindow(minsUntilDeparture, offset)) continue;
-          if (!activeTrain) continue;
-          const trainKey = activeTrain?.tripId || activeTrain?.scheduledTime || 'unknown';
+        for (const offset of dueFixedOffsets(minsUntilDeparture, fixedOffsets)) {
+          const trainKey = activeTrain?.tripId || activeTrain?.scheduledTime || 'live-unavailable';
           const sentKey = `${scheduleId}:${todayKey}:fixed-${offset}:${trainKey}`;
           await sendReservedMessage({
             userId,

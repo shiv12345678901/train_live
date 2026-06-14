@@ -63,7 +63,7 @@ function dueEvents(schedule, now) {
     : [25, 20, 10, 5];
 
   for (const offset of fixedOffsets) {
-    if (Math.abs(minutesUntilDeparture - offset) <= 0) {
+    if (minutesUntilDeparture <= offset && minutesUntilDeparture >= offset - 1) {
       events.push(`fixed-${offset}`);
     }
   }
