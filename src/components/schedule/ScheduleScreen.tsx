@@ -9,6 +9,8 @@ import { toast } from '@/components/shared/toastStore';
 import { hapticSuccess } from '@/lib/haptics';
 import type { AlertFormData } from './AlertForm';
 
+const SCHEDULE_REFRESH_MS = 10_000;
+
 export function ScheduleScreen() {
   const {
     alertSchedules,
@@ -30,6 +32,30 @@ export function ScheduleScreen() {
   useEffect(() => {
     loadAlertSchedules();
     loadRouteCards();
+  }, [loadAlertSchedules, loadRouteCards]);
+
+  useEffect(() => {
+    const refresh = () => {
+      loadAlertSchedules();
+      loadRouteCards();
+    };
+
+    const handleVisible = () => {
+      if (document.visibilityState === 'visible') refresh();
+    };
+
+    const intervalId = window.setInterval(() => {
+      if (document.visibilityState === 'visible') refresh();
+    }, SCHEDULE_REFRESH_MS);
+
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', handleVisible);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', handleVisible);
+    };
   }, [loadAlertSchedules, loadRouteCards]);
 
   // Feature 30: Schedule conflict detection

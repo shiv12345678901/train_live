@@ -181,6 +181,12 @@ function isNewerRouteCard(local: RouteCard, remote: RouteCard): boolean {
   return new Date(local.updatedAt).getTime() > new Date(remote.updatedAt).getTime();
 }
 
+function hasPendingScheduleOps(): boolean {
+  return getPendingOps().some((op) =>
+    op.type === 'create_schedule' || op.type === 'update_schedule' || op.type === 'delete_schedule'
+  );
+}
+
 function remapLocalAlertScheduleRouteIds(localId: string, remoteId: string): void {
   const schedules = getLocalAlertSchedules();
   if (!schedules.some((schedule) => schedule.routeCardId === localId)) return;
@@ -454,7 +460,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
     // Try to sync from backend
     try {
       const remote = await fetchSchedules();
-      if (remote.length > 0 || local.length === 0) {
+      if (!hasPendingScheduleOps()) {
         set({ alertSchedules: remote });
         setLocalAlertSchedules(remote);
         setLastSyncTime();
