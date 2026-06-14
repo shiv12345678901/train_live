@@ -14,8 +14,8 @@ const NSW_TIME_ZONE = 'Australia/Sydney';
 const DEFAULT_FIXED_REMINDERS = [25, 20, 10, 5];
 const DEFAULT_DELAY_RECHECK_MINUTES = 2;
 const DEFAULT_FALLBACK_WINDOW_MINUTES = 5;
-const TRAIN_FETCH_LIMIT = 12;
-const TRAIN_SUMMARY_LIMIT = 8;
+const TRAIN_FETCH_LIMIT = 5;
+const TRAIN_SUMMARY_LIMIT = 5;
 const OTHER_TRAINS_LIMIT = 4;
 
 type ApiRecord = Record<string, unknown>;
