@@ -80,13 +80,20 @@ function dueEvents(schedule, now) {
   };
 }
 
-async function alreadyDispatched(env, schedule, eventName, today) {
+function dispatchKey(schedule, eventName, today) {
   const departureKey = String(schedule.departureTime || 'unknown').replace(/[^0-9:]/g, '');
-  const key = `${DISPATCH_PREFIX}${schedule.userId}:${schedule.scheduleId}:${today}:${departureKey}:${eventName}`;
+  return `${DISPATCH_PREFIX}${schedule.userId}:${schedule.scheduleId}:${today}:${departureKey}:${eventName}`;
+}
+
+async function alreadyDispatched(env, schedule, eventName, today) {
+  const key = dispatchKey(schedule, eventName, today);
   const existing = await env.SCHEDULES.get(key);
-  if (existing) return true;
+  return Boolean(existing);
+}
+
+async function markDispatched(env, schedule, eventName, today) {
+  const key = dispatchKey(schedule, eventName, today);
   await env.SCHEDULES.put(key, '1', { expirationTtl: 2 * 24 * 60 * 60 });
-  return false;
 }
 
 async function dispatchSchedule(env, schedule, eventName) {
@@ -144,14 +151,26 @@ async function runDueChecks(env) {
       for (const eventName of due.events) {
         if (await alreadyDispatched(env, schedule, eventName, today)) continue;
         const response = await dispatchSchedule(env, schedule, eventName);
+        let body = null;
+        try {
+          body = await response.clone().json();
+        } catch {
+          body = null;
+        }
+        const sent = Number(body?.sent || 0);
+        if (response.ok && sent > 0) {
+          await markDispatched(env, schedule, eventName, today);
+        }
         console.log(JSON.stringify({
           type: 'netlify_dispatch',
           scheduleId: schedule.scheduleId,
           eventName,
           status: response.status,
           ok: response.ok,
+          sent,
+          skippedReason: body?.skippedReason || null,
         }));
-        dispatched += 1;
+        if (sent > 0) dispatched += 1;
       }
     }
   } while (cursor);

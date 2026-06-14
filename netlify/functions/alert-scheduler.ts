@@ -78,6 +78,11 @@ interface ResolvedWatch {
   candidates: LiveTrain[];
 }
 
+interface SchedulerRunResult {
+  sent: number;
+  skippedReason?: string;
+}
+
 // ─── Sydney-local date/time helpers ─────────────────────────────────
 
 function getSydneyParts(date: Date): Record<string, string> {
@@ -567,40 +572,46 @@ export async function runAlertSchedulerForSchedule(
   userId: string,
   scheduleId: string,
   eventName?: string
-): Promise<void> {
+): Promise<SchedulerRunResult> {
   const apiKey = process.env.TFN_API_KEY;
-  if (!apiKey) return;
+  if (!apiKey) return { sent: 0, skippedReason: 'missing_api_key' };
 
   const scheduleDoc = await getAlertSchedulesRef(userId).doc(scheduleId).get();
-  if (!scheduleDoc.exists) return;
+  if (!scheduleDoc.exists) return { sent: 0, skippedReason: 'schedule_not_found' };
 
   const alert = scheduleDoc.data() as ApiRecord;
-  if (alert.enabled !== true) return;
+  if (alert.enabled !== true) return { sent: 0, skippedReason: 'schedule_disabled' };
 
   const settingsDoc = await getSettingsRef(userId).get();
   const settings = settingsDoc.data();
   const botToken = settings?.telegramBotToken || process.env.TELEGRAM_BOT_TOKEN;
   const chatId = settings?.telegramChatId || process.env.TELEGRAM_CHAT_ID;
-  if (!botToken || !chatId) return;
+  if (!botToken || !chatId) return { sent: 0, skippedReason: 'missing_telegram_config' };
 
   const now = new Date();
   const todayKey = getSydneyDateKey(now);
   const departureTime = String(alert.departureTime || '');
-  if (!departureTime || !appliesToday(alert, now)) return;
+  if (!departureTime) return { sent: 0, skippedReason: 'missing_departure_time' };
+  if (!appliesToday(alert, now)) return { sent: 0, skippedReason: 'not_today' };
 
   const departureDate = sydneyLocalDateTimeToUtc(todayKey, departureTime);
   const minsUntilDeparture = (departureDate.getTime() - now.getTime()) / 60000;
   const fixedOffsets = (Array.isArray(alert.fixedReminderMinutes) && alert.fixedReminderMinutes.length > 0)
     ? alert.fixedReminderMinutes.filter((value): value is number => typeof value === 'number')
     : DEFAULT_FIXED_REMINDERS;
+  const eventOffset = fixedOffsetFromEvent(eventName);
   const delayRecheckMinutes = typeof alert.delayRecheckMinutes === 'number' ? alert.delayRecheckMinutes : DEFAULT_DELAY_RECHECK_MINUTES;
   const fallbackWindowMinutes = typeof alert.fallbackWindowMinutes === 'number' ? alert.fallbackWindowMinutes : DEFAULT_FALLBACK_WINDOW_MINUTES;
   const maxWatchMinutes = Math.max(...fixedOffsets, 25);
 
-  if (minsUntilDeparture < -1 || minsUntilDeparture > maxWatchMinutes + 1) return;
+  if (eventOffset === null && (minsUntilDeparture < -1 || minsUntilDeparture > maxWatchMinutes + 1)) {
+    return { sent: 0, skippedReason: 'outside_watch_window' };
+  }
 
   const routeInfo = await routeInfoForSchedule(userId, String(alert.routeCardId || ''));
-  if (!routeInfo || !routeInfo.origin || !routeInfo.destination) return;
+  if (!routeInfo || !routeInfo.origin || !routeInfo.destination) {
+    return { sent: 0, skippedReason: 'missing_route_info' };
+  }
 
   const deliveryRef = getAlertDeliveryStateRef(userId).doc(scheduleId);
   const deliveryDoc = await deliveryRef.get();
@@ -620,10 +631,11 @@ export async function runAlertSchedulerForSchedule(
 
   const previousState = delivery.lastKnownTripState;
   await updateDeliveryState(userId, scheduleId, watch);
+  let sent = 0;
 
   if (watch.target?.cancelled && alert.notifyOnCancellationImmediately !== false) {
     const sentKey = `${scheduleId}:${todayKey}:cancelled:${watch.target.tripId || watch.target.scheduledTime}`;
-    await sendReservedMessage({
+    if (await sendReservedMessage({
       userId,
       scheduleId,
       sentKey,
@@ -636,7 +648,7 @@ export async function runAlertSchedulerForSchedule(
         target: watch.target,
         replacement: watch.replacement,
       }),
-    });
+    })) sent += 1;
   }
 
   const activeTrain = watch.active;
@@ -644,7 +656,7 @@ export async function runAlertSchedulerForSchedule(
   for (const offset of dueFixedOffsets(minsUntilDeparture, fixedOffsets, eventName)) {
     const trainKey = activeTrain?.tripId || activeTrain?.scheduledTime || 'live-unavailable';
     const sentKey = `${scheduleId}:${todayKey}:fixed-${offset}:${trainKey}`;
-    await sendReservedMessage({
+    if (await sendReservedMessage({
       userId,
       scheduleId,
       sentKey,
@@ -658,7 +670,7 @@ export async function runAlertSchedulerForSchedule(
         offsetMinutes: offset,
         watch,
       }),
-    });
+    })) sent += 1;
   }
 
   if (
@@ -668,7 +680,7 @@ export async function runAlertSchedulerForSchedule(
   ) {
     const bucket = Math.floor(now.getTime() / (delayRecheckMinutes * 60 * 1000));
     const sentKey = `${scheduleId}:${todayKey}:recheck-${bucket}:${activeTrain.tripId || activeTrain.scheduledTime}:${activeTrain.status}:${activeTrain.delayMinutes || 0}`;
-    await sendReservedMessage({
+    if (await sendReservedMessage({
       userId,
       scheduleId,
       sentKey,
@@ -681,8 +693,10 @@ export async function runAlertSchedulerForSchedule(
         departureTime,
         watch,
       }),
-    });
+    })) sent += 1;
   }
+
+  return { sent, skippedReason: sent > 0 ? undefined : 'no_due_message_or_duplicate' };
 }
 
 // ─── Main Scheduler ─────────────────────────────────────────────────
