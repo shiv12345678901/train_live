@@ -300,10 +300,16 @@ async function releaseSentKey(userId: string, scheduleId: string, sentKey: strin
   }, { merge: true });
 }
 
+function withoutUndefined<T extends Record<string, unknown>>(value: T): T {
+  return Object.fromEntries(
+    Object.entries(value).filter(([, fieldValue]) => fieldValue !== undefined)
+  ) as T;
+}
+
 async function updateDeliveryState(userId: string, scheduleId: string, watch: ResolvedWatch): Promise<void> {
   const train = watch.active || watch.target;
   await getAlertDeliveryStateRef(userId).doc(scheduleId).set({
-    lastKnownTripState: train ? {
+    lastKnownTripState: train ? withoutUndefined({
       tripId: train.tripId,
       route: train.route,
       destination: train.destination,
@@ -314,7 +320,7 @@ async function updateDeliveryState(userId: string, scheduleId: string, watch: Re
       alertsHash: alertsHash(train),
       replacementTripId: watch.replacement?.tripId,
       replacementScheduledTime: watch.replacement?.scheduledTime,
-    } : null,
+    }) : null,
   }, { merge: true });
 }
 
