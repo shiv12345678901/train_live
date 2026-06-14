@@ -112,6 +112,7 @@ export type AlertDeliveryState = {
     tripId?: string;
     route?: string;
     destination?: string;
+    scheduledTime?: string;
     estimatedTime?: string;
     platform?: string;
     status?: string;

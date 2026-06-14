@@ -15,7 +15,8 @@ const NSW_TIME_ZONE = 'Australia/Sydney';
 const DEFAULT_FIXED_REMINDERS = [25, 20, 10, 5];
 const DEFAULT_DELAY_RECHECK_MINUTES = 2;
 const DEFAULT_FALLBACK_WINDOW_MINUTES = 5;
-const NEAREST_TRAIN_SEARCH_WINDOW_MINUTES = 15;
+const NEAREST_TRAIN_SEARCH_WINDOW_MINUTES = 25;
+const TRAIN_SUMMARY_LIMIT = 5;
 
 type ApiRecord = Record<string, unknown>;
 
@@ -51,9 +52,11 @@ interface DeliveryState {
     tripId?: string;
     route?: string;
     destination?: string;
+    scheduledTime?: string;
     estimatedTime?: string;
     platform?: string;
     status?: string;
+    alertsHash?: string;
     replacementTripId?: string;
     replacementScheduledTime?: string;
   } | null;
@@ -73,6 +76,7 @@ interface ResolvedWatch {
   target: LiveTrain | null;
   active: LiveTrain | null;
   replacement: LiveTrain | null;
+  candidates: LiveTrain[];
 }
 
 // ─── Sydney-local date/time helpers ─────────────────────────────────
@@ -437,11 +441,11 @@ function findReplacement(candidates: LiveTrain[], target: LiveTrain, options: Re
 
 async function resolveWatchedTrain(options: ResolveOptions): Promise<ResolvedWatch> {
   const candidates = await fetchTrainCandidates(options);
-  if (candidates.length === 0) return { target: null, active: null, replacement: null };
+  if (candidates.length === 0) return { target: null, active: null, replacement: null, candidates: [] };
 
   // Only consider trains that match the destination (score > 0)
   const validCandidates = candidates.filter(c => scoreCandidate(c, options) > 0);
-  if (validCandidates.length === 0) return { target: null, active: null, replacement: null };
+  if (validCandidates.length === 0) return { target: null, active: null, replacement: null, candidates };
 
   const target = [...validCandidates].sort((a, b) => scoreCandidate(b, options) - scoreCandidate(a, options))[0];
   const replacement = target.cancelled ? findReplacement(validCandidates, target, options) : null;
@@ -450,6 +454,7 @@ async function resolveWatchedTrain(options: ResolveOptions): Promise<ResolvedWat
     target,
     active: replacement || target,
     replacement,
+    candidates: validCandidates,
   };
 }
 
@@ -480,9 +485,11 @@ async function updateDeliveryState(userId: string, scheduleId: string, watch: Re
       tripId: train.tripId,
       route: train.route,
       destination: train.destination,
+      scheduledTime: train.scheduledTime,
       estimatedTime: train.estimatedTime,
       platform: train.platform,
       status: train.status,
+      alertsHash: alertsHash(train),
       replacementTripId: watch.replacement?.tripId,
       replacementScheduledTime: watch.replacement?.scheduledTime,
     } : null,
@@ -493,6 +500,13 @@ async function updateDeliveryState(userId: string, scheduleId: string, watch: Re
 
 function shortStop(name: string): string {
   return name.replace(/\s*(Station|Wharf|Light Rail)\s*/gi, '').replace(/,.*$/, '').trim();
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }
 
 function trainTime(train: LiveTrain | null, fallbackTime: string): string {
@@ -510,19 +524,85 @@ function trainPlatform(train: LiveTrain | null, fallbackPlatform = ''): string {
   return '';
 }
 
+function statusText(train: LiveTrain | null): string {
+  if (!train) return 'Live data unavailable';
+  if (train.cancelled || train.status === 'cancelled') return 'Cancelled';
+  if (train.status === 'delayed' && train.delayMinutes) return `Delayed ${train.delayMinutes} min`;
+  if (train.status === 'on-time') return 'On time';
+  return train.status || 'Unknown';
+}
+
+function alertsHash(train: LiveTrain | null): string {
+  if (!train) return '';
+  return train.alerts
+    .map((alert) => `${alert.title}|${alert.description}`)
+    .join('||')
+    .slice(0, 1000);
+}
+
+function trainIdentity(train: LiveTrain): string {
+  return train.tripId || `${train.scheduledTime}:${train.platform}:${train.route}`;
+}
+
+function sortedSummaryTrains(watch: ResolvedWatch): LiveTrain[] {
+  const byKey = new Map<string, LiveTrain>();
+  for (const train of watch.candidates) byKey.set(trainIdentity(train), train);
+  if (watch.active) byKey.set(trainIdentity(watch.active), watch.active);
+
+  return [...byKey.values()]
+    .sort((a, b) => new Date(a.scheduledTime).getTime() - new Date(b.scheduledTime).getTime())
+    .slice(0, TRAIN_SUMMARY_LIMIT);
+}
+
+function hasMeaningfulChange(previous: DeliveryState['lastKnownTripState'], train: LiveTrain): boolean {
+  if (!previous) return false;
+  return previous.tripId !== train.tripId ||
+    previous.scheduledTime !== train.scheduledTime ||
+    previous.estimatedTime !== train.estimatedTime ||
+    previous.platform !== train.platform ||
+    previous.status !== train.status ||
+    previous.alertsHash !== alertsHash(train);
+}
+
+function isRecheckMinute(minutesUntilDeparture: number, recheckEvery: number): boolean {
+  if (recheckEvery <= 0) return false;
+  if (minutesUntilDeparture <= 10 || minutesUntilDeparture >= 20) return false;
+  const rounded = Math.round(minutesUntilDeparture);
+  if (Math.abs(minutesUntilDeparture - rounded) > 0.75) return false;
+  return rounded % recheckEvery === 0;
+}
+
 function standardMessage(opts: {
   origin: string;
   destination: string;
   time: string;
   platform: string;
   alert?: string;
+  status?: string;
+  others?: LiveTrain[];
+  primary?: LiveTrain | null;
 }): string {
   const lines = [
-    `<b>${shortStop(opts.origin)} → ${shortStop(opts.destination)}</b>`,
-    `Departs: <b>${opts.time}</b>`,
+    `<b>${escapeHtml(shortStop(opts.origin))} to ${escapeHtml(shortStop(opts.destination))}</b>`,
+    `At: <b>${escapeHtml(opts.time)}</b>`,
   ];
-  if (opts.platform) lines.push(`Platform: <b>${opts.platform}</b>`);
-  if (opts.alert) lines.push(`⚠️ ${opts.alert}`);
+  if (opts.platform) lines.push(`Platform: <b>${escapeHtml(opts.platform)}</b>`);
+  lines.push(`Status: ${escapeHtml(opts.status || 'Live data unavailable')}`);
+  if (opts.alert) lines.push(`Alert: ${escapeHtml(opts.alert)}`);
+
+  const otherTrains = (opts.others || [])
+    .filter((train) => !opts.primary || trainIdentity(train) !== trainIdentity(opts.primary))
+    .slice(0, 4);
+
+  if (otherTrains.length > 0) {
+    lines.push('');
+    lines.push('Other trains:');
+    for (const train of otherTrains) {
+      const platform = trainPlatform(train) || 'TBC';
+      lines.push(`${trainTime(train, train.scheduledTime)} - Platform ${escapeHtml(platform)} - ${escapeHtml(statusText(train))}`);
+    }
+  }
+
   return lines.join('\n');
 }
 
@@ -545,10 +625,11 @@ function formatReminderMessage(opts: {
   destination: string;
   departureTime: string;
   offsetMinutes: number;
-  train: LiveTrain | null;
+  watch: ResolvedWatch;
   fallbackPlatform?: string;
 }): string {
-  const { origin, destination, departureTime, train, fallbackPlatform } = opts;
+  const { origin, destination, departureTime, watch, fallbackPlatform } = opts;
+  const train = watch.active;
 
   // Always use the real train time from API, not the saved alert time
   return standardMessage({
@@ -557,19 +638,23 @@ function formatReminderMessage(opts: {
     time: trainTime(train, departureTime),
     platform: trainPlatform(train, fallbackPlatform),
     alert: serviceAlertText(train),
+    status: statusText(train),
+    primary: train,
+    others: sortedSummaryTrains(watch),
   });
 }
 
 
-function formatAvailabilityMessage(opts: {
+function formatUpdateMessage(opts: {
   title: string;
   origin: string;
   destination: string;
   departureTime: string;
-  train: LiveTrain | null;
+  watch: ResolvedWatch;
   fallbackPlatform?: string;
 }): string {
-  const { origin, destination, departureTime, train, fallbackPlatform } = opts;
+  const { origin, destination, departureTime, watch, fallbackPlatform } = opts;
+  const train = watch.active;
 
   return standardMessage({
     origin,
@@ -577,6 +662,9 @@ function formatAvailabilityMessage(opts: {
     time: trainTime(train, departureTime),
     platform: trainPlatform(train, fallbackPlatform),
     alert: serviceAlertText(train),
+    status: statusText(train),
+    primary: train,
+    others: sortedSummaryTrains(watch),
   });
 }
 
@@ -599,23 +687,7 @@ function formatCancellationMessage(opts: {
     time: trainTime(target, target.scheduledTime),
     platform: trainPlatform(target, fallbackPlatform),
     alert,
-  });
-}
-
-function formatDelayMessage(opts: {
-  title: string;
-  origin: string;
-  destination: string;
-  train: LiveTrain;
-  fallbackPlatform?: string;
-}): string {
-  const { origin, destination, train, fallbackPlatform } = opts;
-  return standardMessage({
-    origin,
-    destination,
-    time: trainTime(train, train.scheduledTime),
-    platform: trainPlatform(train, fallbackPlatform),
-    alert: serviceAlertText(train),
+    status: statusText(target),
   });
 }
 
@@ -714,27 +786,8 @@ export async function runAlertSchedulerForSchedule(userId: string, scheduleId: s
     fallbackWindowMinutes,
   });
 
+  const previousState = delivery.lastKnownTripState;
   await updateDeliveryState(userId, scheduleId, watch);
-
-  if (minsUntilDeparture >= -0.5 && minsUntilDeparture <= maxWatchMinutes + 1) {
-    const activeKey = watch.active?.tripId || watch.active?.scheduledTime || 'unknown';
-    const sentKey = `${scheduleId}:${todayKey}:availability:${activeKey}`;
-    await sendReservedMessage({
-      userId,
-      scheduleId,
-      sentKey,
-      botToken,
-      chatId,
-      message: formatAvailabilityMessage({
-        title: String(alert.title || 'Train Alert'),
-        origin: routeInfo.origin,
-        destination: routeInfo.destination,
-        departureTime,
-        train: watch.active,
-        fallbackPlatform: selectedPlatform,
-      }),
-    });
-  }
 
   if (watch.target?.cancelled && alert.notifyOnCancellationImmediately !== false) {
     const sentKey = `${scheduleId}:${todayKey}:cancelled:${watch.target.tripId || watch.target.scheduledTime}`;
@@ -759,6 +812,7 @@ export async function runAlertSchedulerForSchedule(userId: string, scheduleId: s
 
   for (const offset of fixedOffsets) {
     if (!isWithinWindow(minsUntilDeparture, offset)) continue;
+    if (!activeTrain) continue;
     const trainKey = activeTrain?.tripId || activeTrain?.scheduledTime || 'unknown';
     const sentKey = `${scheduleId}:${todayKey}:fixed-${offset}:${trainKey}`;
     await sendReservedMessage({
@@ -773,7 +827,7 @@ export async function runAlertSchedulerForSchedule(userId: string, scheduleId: s
         destination: routeInfo.destination,
         departureTime,
         offsetMinutes: offset,
-        train: activeTrain,
+        watch,
         fallbackPlatform: selectedPlatform,
       }),
     });
@@ -781,24 +835,23 @@ export async function runAlertSchedulerForSchedule(userId: string, scheduleId: s
 
   if (
     activeTrain &&
-    !activeTrain.cancelled &&
-    activeTrain.status === 'delayed' &&
-    minsUntilDeparture >= -0.5 &&
-    minsUntilDeparture <= maxWatchMinutes
+    isRecheckMinute(minsUntilDeparture, delayRecheckMinutes) &&
+    hasMeaningfulChange(previousState, activeTrain)
   ) {
     const bucket = Math.floor(now.getTime() / (delayRecheckMinutes * 60 * 1000));
-    const sentKey = `${scheduleId}:${todayKey}:delay-${bucket}:${activeTrain.tripId || activeTrain.scheduledTime}:${activeTrain.delayMinutes || 0}`;
+    const sentKey = `${scheduleId}:${todayKey}:recheck-${bucket}:${activeTrain.tripId || activeTrain.scheduledTime}:${activeTrain.status}:${activeTrain.delayMinutes || 0}`;
     await sendReservedMessage({
       userId,
       scheduleId,
       sentKey,
       botToken,
       chatId,
-      message: formatDelayMessage({
+      message: formatUpdateMessage({
         title: String(alert.title || 'Train Alert'),
         origin: routeInfo.origin,
         destination: routeInfo.destination,
-        train: activeTrain,
+        departureTime,
+        watch,
         fallbackPlatform: selectedPlatform,
       }),
     });
@@ -870,27 +923,8 @@ export const runAlertScheduler: Handler = async () => {
           fallbackWindowMinutes,
         });
 
+        const previousState = delivery.lastKnownTripState;
         await updateDeliveryState(userId, scheduleId, watch);
-
-        if (minsUntilDeparture >= -0.5 && minsUntilDeparture <= maxWatchMinutes + 1) {
-          const activeKey = watch.active?.tripId || watch.active?.scheduledTime || 'unknown';
-          const sentKey = `${scheduleId}:${todayKey}:availability:${activeKey}`;
-          await sendReservedMessage({
-            userId,
-            scheduleId,
-            sentKey,
-            botToken,
-            chatId,
-            message: formatAvailabilityMessage({
-              title: String(alert.title || 'Train Alert'),
-              origin: routeInfo.origin,
-              destination: routeInfo.destination,
-              departureTime,
-              train: watch.active,
-              fallbackPlatform: selectedPlatform,
-            }),
-          });
-        }
 
         if (watch.target?.cancelled && alert.notifyOnCancellationImmediately !== false) {
           const sentKey = `${scheduleId}:${todayKey}:cancelled:${watch.target.tripId || watch.target.scheduledTime}`;
@@ -915,6 +949,7 @@ export const runAlertScheduler: Handler = async () => {
 
         for (const offset of fixedOffsets) {
           if (!isWithinWindow(minsUntilDeparture, offset)) continue;
+          if (!activeTrain) continue;
           const trainKey = activeTrain?.tripId || activeTrain?.scheduledTime || 'unknown';
           const sentKey = `${scheduleId}:${todayKey}:fixed-${offset}:${trainKey}`;
           await sendReservedMessage({
@@ -929,7 +964,7 @@ export const runAlertScheduler: Handler = async () => {
               destination: routeInfo.destination,
               departureTime,
               offsetMinutes: offset,
-              train: activeTrain,
+              watch,
               fallbackPlatform: selectedPlatform,
             }),
           });
@@ -937,24 +972,23 @@ export const runAlertScheduler: Handler = async () => {
 
         if (
           activeTrain &&
-          !activeTrain.cancelled &&
-          activeTrain.status === 'delayed' &&
-          minsUntilDeparture >= -0.5 &&
-          minsUntilDeparture <= maxWatchMinutes
+          isRecheckMinute(minsUntilDeparture, delayRecheckMinutes) &&
+          hasMeaningfulChange(previousState, activeTrain)
         ) {
           const bucket = Math.floor(now.getTime() / (delayRecheckMinutes * 60 * 1000));
-          const sentKey = `${scheduleId}:${todayKey}:delay-${bucket}:${activeTrain.tripId || activeTrain.scheduledTime}:${activeTrain.delayMinutes || 0}`;
+          const sentKey = `${scheduleId}:${todayKey}:recheck-${bucket}:${activeTrain.tripId || activeTrain.scheduledTime}:${activeTrain.status}:${activeTrain.delayMinutes || 0}`;
           await sendReservedMessage({
             userId,
             scheduleId,
             sentKey,
             botToken,
             chatId,
-            message: formatDelayMessage({
+            message: formatUpdateMessage({
               title: String(alert.title || 'Train Alert'),
               origin: routeInfo.origin,
               destination: routeInfo.destination,
-              train: activeTrain,
+              departureTime,
+              watch,
               fallbackPlatform: selectedPlatform,
             }),
           });

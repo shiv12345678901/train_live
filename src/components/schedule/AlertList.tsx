@@ -128,6 +128,7 @@ function sentActivity(schedule: AlertSchedule): ActivityItem[] {
     const type = key.split(':')[2] || 'sent';
     if (type.startsWith('fixed-')) return { title: `${type.replace('fixed-', '')} min reminder sent` };
     if (type.startsWith('delay-')) return { title: 'Delay message sent' };
+    if (type.startsWith('recheck-')) return { title: 'Live train update sent' };
     if (type === 'cancelled') return { title: 'Cancellation message sent' };
     if (type === 'availability') return { title: 'Availability message sent' };
     return { title: 'Message sent' };
