@@ -7,15 +7,13 @@ import {
   getRouteCardsRef,
   getSettingsRef,
 } from '../../lib/firestore';
-import { fetchWithTimeout } from '../../lib/http';
-import { getTimingStatus } from '../../lib/trainParsing';
 import { sendMessageWithRetry } from '../../lib/telegram';
+import { fetchRouteTrainDepartures, type RouteMode } from './routes-trains';
 
 const NSW_TIME_ZONE = 'Australia/Sydney';
 const DEFAULT_FIXED_REMINDERS = [25, 20, 10, 5];
 const DEFAULT_DELAY_RECHECK_MINUTES = 2;
 const DEFAULT_FALLBACK_WINDOW_MINUTES = 5;
-const NEAREST_TRAIN_SEARCH_WINDOW_MINUTES = 25;
 const TRAIN_SUMMARY_LIMIT = 5;
 
 type ApiRecord = Record<string, unknown>;
@@ -44,6 +42,7 @@ interface RouteInfo {
   destination: string;
   originStopId: string;
   destinationStopId: string;
+  mode?: RouteMode;
 }
 
 interface DeliveryState {
@@ -123,11 +122,6 @@ function sydneyLocalDateTimeToUtc(dateKey: string, timeHHmm: string): Date {
   return new Date(utcGuess - (zonedAsUtc - utcGuess));
 }
 
-function buildTripPlannerTimeParams(date: Date): string {
-  const parts = getSydneyParts(date);
-  return `&itdDate=${parts.year}${parts.month}${parts.day}&itdTime=${parts.hour}${parts.minute}`;
-}
-
 function formatTime12h(time: string): string {
   const [h, m] = time.split(':').map(Number);
   const period = h >= 12 ? 'pm' : 'am';
@@ -192,46 +186,6 @@ function destinationMatches(trainDestination: string, targetDestination?: string
   return train === target || train.includes(target) || target.includes(train);
 }
 
-function extractPlatform(originInfo: ApiRecord): string {
-  const props = (originInfo.properties || {}) as Record<string, string>;
-  const platformName = props.plannedPlatformName || props.platformName || '';
-  if (platformName) {
-    const match = platformName.match(/(\d+|[A-Z])$/i);
-    return match ? match[1] : platformName;
-  }
-
-  const stoppingPoint = props.stoppingPointPlanned || '';
-  if (stoppingPoint) {
-    const match = stoppingPoint.match(/(\d+|[A-Z])$/i);
-    return match ? match[1] : '';
-  }
-
-  const disassembled = String(originInfo.disassembledName || '');
-  const platMatch = disassembled.match(/[Pp]latform\s*(\d+|[A-Z])/);
-  if (platMatch) return platMatch[1];
-
-  const area = props.area || '';
-  if (area && /^\d+$/.test(area) && Number(area) > 0 && Number(area) <= 30) {
-    return area;
-  }
-
-  return '';
-}
-
-function parseServiceAlerts(infos: ApiRecord[]): ServiceAlert[] {
-  const alerts: ServiceAlert[] = [];
-  for (const info of infos.slice(0, 3)) {
-    const title = String(info.title || info.subtitle || '').trim();
-    const description = String(info.content || info.description || '').trim();
-    if (!title && !description) continue;
-    alerts.push({
-      title: title || description.slice(0, 80),
-      description,
-    });
-  }
-  return alerts;
-}
-
 function appliesToday(alert: ApiRecord, now: Date): boolean {
   const todayKey = getSydneyDateKey(now);
   if (alert.oneTimeDate) return String(alert.oneTimeDate) === todayKey;
@@ -243,180 +197,45 @@ function appliesToday(alert: ApiRecord, now: Date): boolean {
 // ─── Train resolution and matching ──────────────────────────────────
 
 async function fetchTrainCandidates(options: ResolveOptions): Promise<LiveTrain[]> {
-  const {
-    apiKey,
-    origin,
-    destination,
-    originStopId,
-    destinationStopId,
-    departureDate,
-  } = options;
-
   try {
-    const queryDate = new Date(departureDate.getTime() - NEAREST_TRAIN_SEARCH_WINDOW_MINUTES * 60 * 1000);
-    const originType = originStopId ? 'stop' : 'any';
-    const originName = originStopId || origin;
-    const destinationType = destinationStopId ? 'stop' : 'any';
-    const destinationName = destinationStopId || destination;
-    const timeParams = buildTripPlannerTimeParams(queryDate);
-    const url = `https://api.transport.nsw.gov.au/v1/tp/trip` +
-      `?outputFormat=rapidJSON` +
-      `&coordOutputFormat=EPSG%3A4326` +
-      `&depArrMacro=dep` +
-      `&type_origin=${originType}` +
-      `&name_origin=${encodeURIComponent(originName)}` +
-      `&type_destination=${destinationType}` +
-      `&name_destination=${encodeURIComponent(destinationName)}` +
-      `&calcNumberOfTrips=12` +
-      `&TfNSWTR=true` +
-      `&version=10.2.1.42` +
-      timeParams;
+    const departures = await fetchRouteTrainDepartures({
+      apiKey: options.apiKey,
+      origin: options.origin,
+      destination: options.destination,
+      originStopId: options.originStopId,
+      destinationStopId: options.destinationStopId,
+      mode: options.mode || 'train',
+      limit: TRAIN_SUMMARY_LIMIT,
+    });
 
-    const res = await fetchWithTimeout(url, { headers: { Authorization: `apikey ${apiKey}` } });
-    if (!res.ok) return [];
+    return departures.map((departure) => {
+      const scheduledMs = new Date(departure.scheduledTime).getTime();
+      const diffMinutes = Number.isNaN(scheduledMs)
+        ? 0
+        : Math.round((scheduledMs - options.departureDate.getTime()) / 60000);
 
-    const data = (await res.json()) as ApiRecord;
-    const journeys = (data?.journeys || []) as ApiRecord[];
-    const seen = new Set<string>();
-    const candidates: LiveTrain[] = [];
-
-    for (const journey of journeys) {
-      const legs = (journey.legs || []) as ApiRecord[];
-      const transitLegs = legs.filter((candidate) => {
-        const candidateTransportation = (candidate.transportation || {}) as ApiRecord;
-        const candidateProduct = (candidateTransportation.product || {}) as ApiRecord;
-        return Number(candidateProduct.class) !== 100;
-      });
-      if (transitLegs.length === 0) continue;
-
-      const leg = transitLegs[0];
-      const transportation = (leg.transportation || {}) as ApiRecord;
-      const originInfo = (leg.origin || {}) as ApiRecord;
-      const scheduledTime = String(originInfo.departureTimePlanned || '');
-      if (!scheduledTime) continue;
-
-      const scheduledMs = new Date(scheduledTime).getTime();
-      if (Number.isNaN(scheduledMs)) continue;
-
-      const diffMinutes = Math.round((scheduledMs - departureDate.getTime()) / 60000);
-      if (Math.abs(diffMinutes) > NEAREST_TRAIN_SEARCH_WINDOW_MINUTES) continue;
-
-      const tripId = String(transportation.id || '');
-      const route = String(transportation.disassembledName || transportation.number || '');
-      const transportDest = (transportation.destination || {}) as ApiRecord;
-      const trainDestination = String(transportDest.name || destination).replace(/,.*$/, '');
-      const platform = extractPlatform(originInfo);
-      const estimatedTimeRaw = String(originInfo.departureTimeEstimated || '');
-      const estimatedTime = estimatedTimeRaw || undefined;
-      const cancelled = leg.isCancelled === true;
-      const { status, delayMinutes } = getTimingStatus(scheduledTime, estimatedTime, cancelled);
-      const alerts = parseServiceAlerts((journey.infos || []) as ApiRecord[]);
-      const key = `${tripId}:${scheduledTime}:${platform}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-
-      candidates.push({
-        tripId,
-        route,
-        destination: trainDestination,
-        platform,
-        scheduledTime,
-        estimatedTime,
-        status,
-        delayMinutes,
-        cancelled,
+      return {
+        tripId: departure.tripId,
+        route: departure.route,
+        destination: departure.destination || options.destination,
+        platform: departure.platform,
+        scheduledTime: departure.scheduledTime,
+        estimatedTime: departure.estimatedTime,
+        status: departure.status,
+        delayMinutes: departure.delayMinutes,
+        cancelled: departure.cancelled,
         diffMinutes,
-        alerts,
-      });
-    }
-
-    const enriched = await enrichPlatformsFromDepartureMonitor(candidates, options);
-    return enriched.sort((a, b) => Math.abs(a.diffMinutes) - Math.abs(b.diffMinutes));
+        alerts: departure.alerts.map((alert) => ({
+          title: alert.title,
+          description: alert.description,
+        })),
+      };
+    }).filter((train) => {
+      const scheduledMs = new Date(train.scheduledTime).getTime();
+      return !Number.isNaN(scheduledMs);
+    }).sort((a, b) => Math.abs(a.diffMinutes) - Math.abs(b.diffMinutes));
   } catch {
     return [];
-  }
-}
-
-async function enrichPlatformsFromDepartureMonitor(candidates: LiveTrain[], options: ResolveOptions): Promise<LiveTrain[]> {
-  if (candidates.length === 0) return candidates;
-
-  try {
-    // Resolve stop ID if not provided (same issue as routes-trains)
-    let dmName = options.originStopId;
-    let dmType = 'stop';
-
-    if (!dmName) {
-      // Try Stop Finder to get proper ID
-      const sfUrl = `https://api.transport.nsw.gov.au/v1/tp/stop_finder?outputFormat=rapidJSON&type_sf=any&name_sf=${encodeURIComponent(options.origin)}&TfNSWSF=true&version=10.2.1.42`;
-      const sfRes = await fetchWithTimeout(sfUrl, { headers: { Authorization: `apikey ${options.apiKey}` } }, 6000);
-      if (sfRes.ok) {
-        const sfData = (await sfRes.json()) as ApiRecord;
-        const locs = (sfData?.locations || []) as ApiRecord[];
-        for (const loc of locs) {
-          if (loc.isGlobalId && loc.type === 'stop') {
-            dmName = String(loc.id);
-            break;
-          }
-        }
-      }
-    }
-
-    if (!dmName) {
-      dmName = options.origin;
-      dmType = 'any';
-    }
-
-    const dmUrl = `https://api.transport.nsw.gov.au/v1/tp/departure_mon` +
-      `?outputFormat=rapidJSON` +
-      `&coordOutputFormat=EPSG%3A4326` +
-      `&mode=direct` +
-      `&type_dm=${dmType}` +
-      `&name_dm=${encodeURIComponent(dmName)}` +
-      `&departureMonitorMacro=true` +
-      `&TfNSWDM=true` +
-      `&version=10.2.1.42` +
-      `&limit=80`;
-
-    const res = await fetchWithTimeout(dmUrl, { headers: { Authorization: `apikey ${options.apiKey}` } });
-    if (!res.ok) return candidates;
-
-    const data = (await res.json()) as ApiRecord;
-    const events = ((data.stopEvents || []) as ApiRecord[]).map((event) => {
-      const transportation = (event.transportation || {}) as ApiRecord;
-      const destination = (transportation.destination || {}) as ApiRecord;
-      return {
-        tripId: String(transportation.id || ''),
-        route: String(transportation.disassembledName || transportation.number || ''),
-        destination: String(destination.name || '').replace(/,.*$/, ''),
-        scheduledTime: String(event.departureTimePlanned || ''),
-        estimatedTime: String(event.departureTimeEstimated || '') || undefined,
-        platform: extractPlatform((event.location || {}) as ApiRecord),
-        cancelled: event.isCancelled === true,
-        alerts: parseServiceAlerts((event.infos || []) as ApiRecord[]),
-      };
-    });
-
-    return candidates.map((candidate) => {
-      const match = events.find((event) => {
-        const sameTrip = candidate.tripId && event.tripId && candidate.tripId === event.tripId;
-        const timeDiff = Math.abs(new Date(event.scheduledTime).getTime() - new Date(candidate.scheduledTime).getTime()) / 60000;
-        const sameService = timeDiff <= 2 &&
-          routeMatches(event.route, candidate.route) &&
-          destinationMatches(event.destination || candidate.destination, candidate.destination || options.destination);
-        return sameTrip || sameService;
-      });
-
-      if (!match) return candidate;
-      return {
-        ...candidate,
-        platform: match.platform || candidate.platform,
-        estimatedTime: match.estimatedTime || candidate.estimatedTime,
-        cancelled: match.cancelled || candidate.cancelled,
-        alerts: match.alerts.length > 0 ? match.alerts : candidate.alerts,
-      };
-    });
-  } catch {
-    return candidates;
   }
 }
 
@@ -462,8 +281,11 @@ async function resolveWatchedTrain(options: ResolveOptions): Promise<ResolvedWat
   const candidates = await fetchTrainCandidates(options);
   if (candidates.length === 0) return { target: null, active: null, replacement: null, candidates: [] };
 
-  // Only consider trains that match the destination (score > 0)
-  const validCandidates = candidates.filter(c => scoreCandidate(c, options) > 0);
+  // Pick the closest destination-matching train from the fetched window. Do not
+  // reject wider gaps here; sparse services can legitimately be 15+ min apart.
+  const validCandidates = candidates.filter((candidate) =>
+    destinationMatches(candidate.destination, options.targetDestination || options.destination)
+  );
   if (validCandidates.length === 0) return { target: null, active: null, replacement: null, candidates };
 
   const target = [...validCandidates].sort((a, b) => scoreCandidate(b, options) - scoreCandidate(a, options))[0];
@@ -569,7 +391,7 @@ function sortedSummaryTrains(watch: ResolvedWatch): LiveTrain[] {
   if (watch.active) byKey.set(trainIdentity(watch.active), watch.active);
 
   return [...byKey.values()]
-    .sort((a, b) => new Date(a.scheduledTime).getTime() - new Date(b.scheduledTime).getTime())
+    .sort((a, b) => Math.abs(a.diffMinutes) - Math.abs(b.diffMinutes))
     .slice(0, TRAIN_SUMMARY_LIMIT);
 }
 
@@ -750,6 +572,7 @@ async function routeInfoForSchedule(userId: string, routeCardId: string): Promis
     destination: cardData.destination || '',
     originStopId: cardData.originStopId || '',
     destinationStopId: cardData.destinationStopId || '',
+    mode: cardData.mode || 'train',
   };
 }
 

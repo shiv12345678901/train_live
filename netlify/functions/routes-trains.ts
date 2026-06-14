@@ -6,7 +6,7 @@ import { handleCors, CORS_HEADERS } from '../../lib/cors';
 
 type OccupancyLevel = 'empty' | 'low' | 'medium' | 'high' | 'full' | 'unknown';
 
-interface ServiceAlert {
+export interface ServiceAlert {
   id: string;
   title: string;
   description: string;
@@ -36,7 +36,7 @@ interface JourneyLeg {
   isWalking?: boolean;
 }
 
-interface TrainDeparture {
+export interface TrainDeparture {
   tripId: string;
   route: string;
   destination?: string;
@@ -53,7 +53,17 @@ interface TrainDeparture {
   fareEstimate?: FareEstimate;
 }
 
-type RouteMode = TransportType | 'all';
+export type RouteMode = TransportType | 'all';
+
+export interface RouteTrainFetchOptions {
+  apiKey: string;
+  origin: string;
+  destination: string;
+  originStopId?: string;
+  destinationStopId?: string;
+  mode?: RouteMode;
+  limit?: number;
+}
 
 function parseMode(value: string | undefined): RouteMode {
   return value && ['all', 'train', 'metro', 'bus', 'light_rail', 'ferry'].includes(value)
@@ -264,6 +274,59 @@ function parseAlerts(infos: Array<Record<string, unknown>>): ServiceAlert[] {
 // Strategy: Trip Planner first, Departure Monitor fallback.
 // ─────────────────────────────────────────────────────────────────────
 
+export async function fetchRouteTrainDepartures(options: RouteTrainFetchOptions): Promise<TrainDeparture[]> {
+  const {
+    apiKey,
+    origin,
+    destination,
+    originStopId = '',
+    destinationStopId = '',
+    mode = 'train',
+    limit = 5,
+  } = options;
+
+  const resultLimit = Math.min(Math.max(Math.round(limit) || 5, 1), 50);
+  let resolvedOriginId = originStopId;
+  let resolvedDestId = destinationStopId;
+
+  if (!resolvedOriginId) {
+    resolvedOriginId = await resolveStopId(apiKey, origin);
+  }
+
+  if (!resolvedDestId) {
+    resolvedDestId = await resolveStopId(apiKey, destination);
+  }
+
+  let departures: TrainDeparture[] = [];
+
+  if (resolvedOriginId) {
+    departures = await fetchViaDepartureMonitor(
+      apiKey,
+      origin,
+      destination,
+      resolvedOriginId,
+      resolvedDestId,
+      mode,
+      resultLimit
+    );
+  }
+
+  if (departures.length < resultLimit) {
+    departures = await fetchTripPlannerScheduleWindow(
+      apiKey,
+      origin,
+      destination,
+      resolvedOriginId,
+      resolvedDestId,
+      mode,
+      resultLimit,
+      departures
+    );
+  }
+
+  return dedupeAndSortDepartures(departures).slice(0, resultLimit);
+}
+
 const handler: Handler = async (event) => {
   const corsResponse = handleCors(event.httpMethod);
   if (corsResponse) return corsResponse;
@@ -328,49 +391,20 @@ const handler: Handler = async (event) => {
       };
     }
 
-    let resolvedOriginId = originStopId;
-    let resolvedDestId = destinationStopId;
-
-    if (!resolvedOriginId) {
-      resolvedOriginId = await resolveStopId(apiKey, origin);
-    }
-
-    if (!resolvedDestId) {
-      resolvedDestId = await resolveStopId(apiKey, destination);
-    }
-
-    // Strategy: Use Departure Monitor for bulk results (like Opal app does).
-    // DM returns 40+ departures. We filter by destination using onwardLocations.
-    // Fall back to Trip Planner only if DM returns nothing.
-    let departures: TrainDeparture[] = [];
-
-    if (resolvedOriginId) {
-      departures = await fetchViaDepartureMonitor(
-        apiKey, origin, destination, resolvedOriginId, resolvedDestId, selectedMode, resultLimit
-      );
-    }
-
-    // If DM doesn't fill the page, supplement with Trip Planner batches.
-    // Future batches use explicit Sydney-local itdDate/itdTime parameters so
-    // low-frequency routes can show later today and tomorrow instead of stopping
-    // after the short live departure window.
-    if (departures.length < resultLimit) {
-      departures = await fetchTripPlannerScheduleWindow(
-        apiKey,
-        origin,
-        destination,
-        resolvedOriginId,
-        resolvedDestId,
-        selectedMode,
-        resultLimit,
-        departures
-      );
-    }
+    const departures = await fetchRouteTrainDepartures({
+      apiKey,
+      origin,
+      destination,
+      originStopId,
+      destinationStopId,
+      mode: selectedMode,
+      limit: resultLimit,
+    });
 
     return {
       statusCode: 200,
       headers: CORS_HEADERS,
-      body: JSON.stringify(dedupeAndSortDepartures(departures).slice(0, resultLimit)),
+      body: JSON.stringify(departures),
     };
   } catch (error) {
     const msg = error instanceof Error ? error.message : 'Unknown error';
