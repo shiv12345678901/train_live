@@ -33,9 +33,10 @@ const handler: Handler = async (event, context) => {
   const userId = event.queryStringParameters?.userId || 'default-user';
   const scheduleId = event.queryStringParameters?.scheduleId;
   const eventName = event.queryStringParameters?.event;
+  const departureTime = event.queryStringParameters?.departureTime;
   if (scheduleId) {
-    const result = await runAlertSchedulerForSchedule(userId, scheduleId, eventName);
-    return json(200, { ok: result.sent > 0, userId, scheduleId, event: eventName || null, ...result });
+    const result = await runAlertSchedulerForSchedule(userId, scheduleId, eventName, departureTime);
+    return json(200, { ok: result.sent > 0, userId, scheduleId, event: eventName || null, departureTime: departureTime || null, ...result });
   }
 
   const response = await runAlertScheduler(event, context);

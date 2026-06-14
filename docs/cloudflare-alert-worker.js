@@ -106,6 +106,7 @@ async function dispatchSchedule(env, schedule, eventName) {
   url.searchParams.set('userId', schedule.userId);
   url.searchParams.set('scheduleId', schedule.scheduleId);
   url.searchParams.set('event', eventName);
+  url.searchParams.set('departureTime', schedule.departureTime);
 
   return fetch(url.toString(), {
     method: 'GET',

@@ -17,6 +17,7 @@ const DEFAULT_FALLBACK_WINDOW_MINUTES = 5;
 const TRAIN_FETCH_LIMIT = 5;
 const TRAIN_SUMMARY_LIMIT = 5;
 const OTHER_TRAINS_LIMIT = 4;
+const PAST_TRAIN_GRACE_MS = 60 * 1000;
 
 type ApiRecord = Record<string, unknown>;
 
@@ -134,6 +135,10 @@ function formatTime12h(time: string): string {
   return `${hour12}:${String(m).padStart(2, '0')} ${period}`;
 }
 
+function isHHmm(value?: string): value is string {
+  return typeof value === 'string' && /^([01]\d|2[0-3]):([0-5]\d)$/.test(value);
+}
+
 function formatIsoSydneyTime(isoTime?: string): string {
   if (!isoTime) return '';
   const date = new Date(isoTime);
@@ -233,6 +238,11 @@ async function fetchTrainCandidates(options: ResolveOptions): Promise<LiveTrain[
   }
 }
 
+function isUpcomingTrain(train: LiveTrain): boolean {
+  const liveMs = new Date(train.estimatedTime || train.scheduledTime).getTime();
+  return !Number.isNaN(liveMs) && liveMs >= Date.now() - PAST_TRAIN_GRACE_MS;
+}
+
 function scoreCandidate(train: LiveTrain, options: ResolveOptions): number {
   // MUST match destination — reject if train doesn't go where user wants
   // Strongly prefer the train closest to the user's set departure time
@@ -272,7 +282,7 @@ async function resolveWatchedTrain(options: ResolveOptions): Promise<ResolvedWat
 
   // Pick the closest destination-matching train from the fetched window. Do not
   // reject wider gaps here; sparse services can legitimately be 15+ min apart.
-  const validCandidates = candidates;
+  const validCandidates = candidates.filter(isUpcomingTrain);
   if (validCandidates.length === 0) return { target: null, active: null, replacement: null, candidates };
 
   const target = [...validCandidates].sort((a, b) => scoreCandidate(b, options) - scoreCandidate(a, options))[0];
@@ -571,7 +581,8 @@ async function routeInfoForSchedule(userId: string, routeCardId: string): Promis
 export async function runAlertSchedulerForSchedule(
   userId: string,
   scheduleId: string,
-  eventName?: string
+  eventName?: string,
+  eventDepartureTime?: string
 ): Promise<SchedulerRunResult> {
   const apiKey = process.env.TFN_API_KEY;
   if (!apiKey) return { sent: 0, skippedReason: 'missing_api_key' };
@@ -590,7 +601,7 @@ export async function runAlertSchedulerForSchedule(
 
   const now = new Date();
   const todayKey = getSydneyDateKey(now);
-  const departureTime = String(alert.departureTime || '');
+  const departureTime = isHHmm(eventDepartureTime) ? eventDepartureTime : String(alert.departureTime || '');
   if (!departureTime) return { sent: 0, skippedReason: 'missing_departure_time' };
   if (!appliesToday(alert, now)) return { sent: 0, skippedReason: 'not_today' };
 
