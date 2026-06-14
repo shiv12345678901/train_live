@@ -85,6 +85,52 @@ function formatTrainDetailsMessage(opts: {
   return lines.join('\n');
 }
 
+export async function buildLiveTrainDetailsMessageForSchedule(
+  userId: string,
+  scheduleId: string
+): Promise<string> {
+  const apiKey = process.env.TFN_API_KEY;
+  if (!apiKey) throw new Error('TFN_API_KEY not configured');
+
+  const scheduleDoc = await getAlertSchedulesRef(userId).doc(scheduleId).get();
+  if (!scheduleDoc.exists) throw new Error('Alert schedule not found');
+
+  const schedule = scheduleDoc.data();
+  const routeCardId = String(schedule?.routeCardId || '');
+  if (!routeCardId) throw new Error('Schedule is missing a route');
+
+  const routeDoc = await getRouteCardsRef(userId).doc(routeCardId).get();
+  if (!routeDoc.exists) throw new Error('Route for this schedule was not found');
+
+  const route = routeDoc.data() || {};
+  const origin = String(route.origin || '');
+  const destination = String(route.destination || '');
+  if (!origin || !destination) throw new Error('Route is missing origin or destination');
+
+  const trains = await fetchRouteTrainDepartures({
+    apiKey,
+    origin,
+    destination,
+    originStopId: String(route.originStopId || ''),
+    destinationStopId: String(route.destinationStopId || ''),
+    mode: route.mode || 'train',
+    limit: TRAIN_TEST_LIMIT,
+  });
+
+  const nextTrain = trains.find((train) =>
+    new Date(train.estimatedTime || train.scheduledTime).getTime() >= Date.now() - 60 * 1000
+  ) || trains[0];
+
+  if (!nextTrain) throw new Error('No upcoming trains returned for this route');
+
+  return formatTrainDetailsMessage({
+    origin,
+    destination,
+    train: nextTrain,
+    others: trains,
+  });
+}
+
 const handler: Handler = async (event) => {
   const corsResp = handleCors(event.httpMethod); if (corsResp) return corsResp;
   if (event.httpMethod !== 'POST') {
@@ -128,68 +174,7 @@ const handler: Handler = async (event) => {
       };
     }
 
-    const apiKey = process.env.TFN_API_KEY;
-    if (!apiKey) {
-      return {
-        statusCode: 503,
-        body: JSON.stringify({ error: 'TFN_API_KEY not configured' }),
-      };
-    }
-
-    const schedule = scheduleDoc.data();
-    const routeCardId = String(schedule?.routeCardId || '');
-    if (!routeCardId) {
-      return {
-        statusCode: 400,
-        body: JSON.stringify({ error: 'Schedule is missing a route' }),
-      };
-    }
-
-    const routeDoc = await getRouteCardsRef(userId).doc(routeCardId).get();
-    if (!routeDoc.exists) {
-      return {
-        statusCode: 404,
-        body: JSON.stringify({ error: 'Route for this schedule was not found' }),
-      };
-    }
-
-    const route = routeDoc.data() || {};
-    const origin = String(route.origin || '');
-    const destination = String(route.destination || '');
-    if (!origin || !destination) {
-      return {
-        statusCode: 400,
-        body: JSON.stringify({ error: 'Route is missing origin or destination' }),
-      };
-    }
-
-    const trains = await fetchRouteTrainDepartures({
-      apiKey,
-      origin,
-      destination,
-      originStopId: String(route.originStopId || ''),
-      destinationStopId: String(route.destinationStopId || ''),
-      mode: route.mode || 'train',
-      limit: TRAIN_TEST_LIMIT,
-    });
-
-    const nextTrain = trains.find((train) =>
-      new Date(train.estimatedTime || train.scheduledTime).getTime() >= Date.now() - 60 * 1000
-    ) || trains[0];
-
-    if (!nextTrain) {
-      return {
-        statusCode: 404,
-        body: JSON.stringify({ error: 'No upcoming trains returned for this route' }),
-      };
-    }
-
-    const testMessage = formatTrainDetailsMessage({
-      origin,
-      destination,
-      train: nextTrain,
-      others: trains,
-    });
+    const testMessage = await buildLiveTrainDetailsMessageForSchedule(userId, cleanScheduleId);
 
     const success = await sendMessageWithRetry(botToken, chatId, testMessage);
 

@@ -9,6 +9,7 @@ import {
 } from '../../lib/firestore';
 import { sendMessageWithRetry } from '../../lib/telegram';
 import { fetchRouteTrainDepartures, type RouteMode } from './routes-trains';
+import { buildLiveTrainDetailsMessageForSchedule } from './schedules-test';
 
 const NSW_TIME_ZONE = 'Australia/Sydney';
 const DEFAULT_FIXED_REMINDERS = [25, 20, 10, 5];
@@ -667,20 +668,14 @@ export async function runAlertSchedulerForSchedule(
   for (const offset of dueFixedOffsets(minsUntilDeparture, fixedOffsets, eventName)) {
     const trainKey = activeTrain?.tripId || activeTrain?.scheduledTime || 'live-unavailable';
     const sentKey = `${scheduleId}:${todayKey}:fixed-${offset}:${trainKey}`;
+    const message = await buildLiveTrainDetailsMessageForSchedule(userId, scheduleId);
     if (await sendReservedMessage({
       userId,
       scheduleId,
       sentKey,
       botToken,
       chatId,
-      message: formatReminderMessage({
-        title: String(alert.title || 'Train Alert'),
-        origin: routeInfo.origin,
-        destination: routeInfo.destination,
-        departureTime,
-        offsetMinutes: offset,
-        watch,
-      }),
+      message,
     })) sent += 1;
   }
 
@@ -798,20 +793,14 @@ export const runAlertScheduler: Handler = async () => {
         for (const offset of dueFixedOffsets(minsUntilDeparture, fixedOffsets)) {
           const trainKey = activeTrain?.tripId || activeTrain?.scheduledTime || 'live-unavailable';
           const sentKey = `${scheduleId}:${todayKey}:fixed-${offset}:${trainKey}`;
+          const message = await buildLiveTrainDetailsMessageForSchedule(userId, scheduleId);
           await sendReservedMessage({
             userId,
             scheduleId,
             sentKey,
             botToken,
             chatId,
-            message: formatReminderMessage({
-              title: String(alert.title || 'Train Alert'),
-              origin: routeInfo.origin,
-              destination: routeInfo.destination,
-              departureTime,
-              offsetMinutes: offset,
-              watch,
-            }),
+            message,
           });
         }
 
