@@ -1795,6 +1795,64 @@ body {
   padding-top: 0;
 }
 
+.settings-status-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-sm);
+  margin-bottom: var(--space-md);
+}
+
+.settings-status-card,
+.settings-health-list > div,
+.settings-metrics > div {
+  min-width: 0;
+  padding: var(--space-md);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+}
+
+.settings-status-card span,
+.settings-health-list span,
+.settings-metrics span {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.settings-status-card strong,
+.settings-health-list strong,
+.settings-metrics strong {
+  display: block;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.25;
+}
+
+.settings-status-card p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.settings-health-list,
+.settings-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-sm);
+}
+
+.settings-button-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-sm);
+}
+
 .setting-row {
   display: flex;
   flex-direction: column;
@@ -1928,6 +1986,13 @@ body {
 /* ─── Responsive: Narrow devices ────────────────────────────────────── */
 
 @media (max-width: 359px) {
+  .settings-status-grid,
+  .settings-health-list,
+  .settings-metrics,
+  .settings-button-row {
+    grid-template-columns: 1fr;
+  }
+
   .route-card-grid {
     padding-inline: 8px;
   }
