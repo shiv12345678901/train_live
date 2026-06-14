@@ -14,8 +14,9 @@ const NSW_TIME_ZONE = 'Australia/Sydney';
 const DEFAULT_FIXED_REMINDERS = [25, 20, 10, 5];
 const DEFAULT_DELAY_RECHECK_MINUTES = 2;
 const DEFAULT_FALLBACK_WINDOW_MINUTES = 5;
+const TRAIN_FETCH_LIMIT = 12;
 const TRAIN_SUMMARY_LIMIT = 8;
-const OTHER_TRAINS_LIMIT = 3;
+const OTHER_TRAINS_LIMIT = 4;
 
 type ApiRecord = Record<string, unknown>;
 
@@ -193,7 +194,7 @@ async function fetchTrainCandidates(options: ResolveOptions): Promise<LiveTrain[
       originStopId: options.originStopId,
       destinationStopId: options.destinationStopId,
       mode: options.mode || 'train',
-      limit: TRAIN_SUMMARY_LIMIT,
+      limit: TRAIN_FETCH_LIMIT,
     });
 
     return departures.map((departure) => {
@@ -428,6 +429,9 @@ function standardMessage(opts: {
       const platform = trainPlatform(train) || 'TBC';
       lines.push(`${trainTime(train, train.scheduledTime)} - Platform ${escapeHtml(platform)} - ${escapeHtml(statusText(train))}`);
     }
+  } else if ((opts.others || []).length > 0) {
+    lines.push('');
+    lines.push('No other train available');
   }
 
   return lines.join('\n');
