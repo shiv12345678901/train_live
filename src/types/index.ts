@@ -99,10 +99,23 @@ export type ServiceAlert = {
 export type AlertDeliveryState = {
   alertScheduleId: string;
   sentKeys: string[];
+  updatedAt?: string;
+  activity?: {
+    sentAt: string;
+    sentKey: string;
+    message: string;
+    source?: 'scheduler' | 'test';
+  }[];
   lastKnownTripState?: {
+    tripId?: string;
+    route?: string;
+    destination?: string;
+    scheduledTime?: string;
     estimatedTime?: string;
     platform?: string;
     status?: string;
+    replacementTripId?: string;
+    replacementScheduledTime?: string;
     alertsHash?: string;
   };
 };

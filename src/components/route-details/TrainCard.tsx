@@ -268,7 +268,6 @@ export function TrainCard({ train, onBellTap, onTap, isScheduled = false }: Trai
         )}
         <AlertChips alerts={train.alerts} />
       </div>
-      
       {hasMultiLeg && <MultiLegSummary legs={train.legs} />}
     </div>
   );

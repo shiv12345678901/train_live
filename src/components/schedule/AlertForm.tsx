@@ -60,6 +60,8 @@ export function AlertForm({ prefillData, editSchedule, routeCards, onSave, onCan
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const selectedRoute = routeCards.find((r) => r.id === selectedRouteId);
+  const usesPrefilledTrain = Boolean(prefillData?.departureTime && departureTime === prefillData.departureTime);
+  const usesEditedTrain = Boolean(editSchedule?.departureTime && departureTime === editSchedule.departureTime);
 
   const handleRouteSelect = (routeId: string) => {
     setSelectedRouteId(routeId);

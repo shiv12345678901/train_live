@@ -1,5 +1,4 @@
 import type { Handler } from '@netlify/functions';
-import { schedule } from '@netlify/functions';
 import { FieldValue } from 'firebase-admin/firestore';
 import {
   getAlertSchedulesRef,
@@ -8,9 +7,9 @@ import {
   getRouteCardsRef,
   getSettingsRef,
 } from '../../lib/firestore';
-import { fetchWithTimeout } from '../../lib/http';
-import { getTimingStatus } from '../../lib/trainParsing';
 import { sendMessageWithRetry } from '../../lib/telegram';
+import { fetchRouteTrainDepartures, type RouteMode } from './routes-trains';
+import { buildLiveTrainDetailsMessageForSchedule } from './schedules-test';
 
 const NSW_TIME_ZONE = 'Australia/Sydney';
 const DEFAULT_FIXED_REMINDERS = [25, 20, 10, 5];
@@ -362,9 +361,12 @@ function formatReminderMessage(opts: {
   title: string;
   origin: string;
   destination: string;
-  departureTime: string;
-  offsetMinutes: number;
-  train: LiveTrain | null;
+  time: string;
+  platform: string;
+  alert?: string;
+  status?: string;
+  others?: LiveTrain[];
+  primary?: LiveTrain | null;
 }): string {
   const { title, origin, destination, departureTime, offsetMinutes, train } = opts;
   const lines: string[] = [
@@ -443,7 +445,156 @@ function formatCancellationMessage(opts: {
     lines.push(``, `No same-platform, same-route replacement found within 5 min. Please check the app.`);
   }
 
-  return lines.join('\n');
+  await getAlertDeliveryStateRef(userId).doc(scheduleId).set({
+    activity: FieldValue.arrayUnion({
+      sentAt: new Date().toISOString(),
+      sentKey,
+      message,
+      source: 'scheduler',
+    }),
+    updatedAt: new Date().toISOString(),
+  }, { merge: true });
+  return sent;
+}
+
+async function routeInfoForSchedule(userId: string, routeCardId: string): Promise<RouteInfo | null> {
+  if (!routeCardId) return null;
+  const cardDoc = await getRouteCardsRef(userId).doc(routeCardId).get();
+  if (!cardDoc.exists) return null;
+  const cardData = cardDoc.data()!;
+  return {
+    origin: cardData.origin || '',
+    destination: cardData.destination || '',
+    originStopId: cardData.originStopId || '',
+    destinationStopId: cardData.destinationStopId || '',
+    mode: cardData.mode || 'train',
+  };
+}
+
+export async function runAlertSchedulerForSchedule(
+  userId: string,
+  scheduleId: string,
+  eventName?: string,
+  eventDepartureTime?: string
+): Promise<SchedulerRunResult> {
+  const apiKey = process.env.TFN_API_KEY;
+  if (!apiKey) return { sent: 0, skippedReason: 'missing_api_key' };
+
+  const scheduleDoc = await getAlertSchedulesRef(userId).doc(scheduleId).get();
+  if (!scheduleDoc.exists) return { sent: 0, skippedReason: 'schedule_not_found' };
+
+  const alert = scheduleDoc.data() as ApiRecord;
+  if (alert.enabled !== true) return { sent: 0, skippedReason: 'schedule_disabled' };
+
+  const settingsDoc = await getSettingsRef(userId).get();
+  const settings = settingsDoc.data();
+  const botToken = settings?.telegramBotToken || process.env.TELEGRAM_BOT_TOKEN;
+  const chatId = settings?.telegramChatId || process.env.TELEGRAM_CHAT_ID;
+  if (!botToken || !chatId) return { sent: 0, skippedReason: 'missing_telegram_config' };
+
+  const now = new Date();
+  const todayKey = getSydneyDateKey(now);
+  const departureTime = isHHmm(eventDepartureTime) ? eventDepartureTime : String(alert.departureTime || '');
+  if (!departureTime) return { sent: 0, skippedReason: 'missing_departure_time' };
+  if (!appliesToday(alert, now)) return { sent: 0, skippedReason: 'not_today' };
+
+  const departureDate = sydneyLocalDateTimeToUtc(todayKey, departureTime);
+  const minsUntilDeparture = (departureDate.getTime() - now.getTime()) / 60000;
+  const fixedOffsets = (Array.isArray(alert.fixedReminderMinutes) && alert.fixedReminderMinutes.length > 0)
+    ? alert.fixedReminderMinutes.filter((value): value is number => typeof value === 'number')
+    : DEFAULT_FIXED_REMINDERS;
+  const eventOffset = fixedOffsetFromEvent(eventName);
+  const delayRecheckMinutes = typeof alert.delayRecheckMinutes === 'number' ? alert.delayRecheckMinutes : DEFAULT_DELAY_RECHECK_MINUTES;
+  const fallbackWindowMinutes = typeof alert.fallbackWindowMinutes === 'number' ? alert.fallbackWindowMinutes : DEFAULT_FALLBACK_WINDOW_MINUTES;
+  const maxWatchMinutes = Math.max(...fixedOffsets, 25);
+
+  if (eventOffset === null && (minsUntilDeparture < -1 || minsUntilDeparture > maxWatchMinutes + 1)) {
+    return { sent: 0, skippedReason: 'outside_watch_window' };
+  }
+
+  const routeInfo = await routeInfoForSchedule(userId, String(alert.routeCardId || ''));
+  if (!routeInfo || !routeInfo.origin || !routeInfo.destination) {
+    return { sent: 0, skippedReason: 'missing_route_info' };
+  }
+
+  const deliveryRef = getAlertDeliveryStateRef(userId).doc(scheduleId);
+  const deliveryDoc = await deliveryRef.get();
+  const delivery = (deliveryDoc.data() || { sentKeys: [], lastKnownTripState: null }) as DeliveryState;
+  const sentKeys = delivery.sentKeys || [];
+  const freshSentKeys = sentKeys.filter((key) => key.includes(todayKey));
+  if (freshSentKeys.length < sentKeys.length) await deliveryRef.set({ sentKeys: freshSentKeys }, { merge: true });
+
+  const watch = await resolveWatchedTrain({
+    apiKey,
+    ...routeInfo,
+    departureDate,
+    selectedTripId: String(alert.selectedTripId || ''),
+    targetRoute: String(alert.targetRoute || ''),
+    fallbackWindowMinutes,
+  });
+
+  const previousState = delivery.lastKnownTripState;
+  await updateDeliveryState(userId, scheduleId, watch);
+  let sent = 0;
+
+  if (watch.target?.cancelled && alert.notifyOnCancellationImmediately !== false) {
+    const sentKey = `${scheduleId}:${todayKey}:cancelled:${watch.target.tripId || watch.target.scheduledTime}`;
+    if (await sendReservedMessage({
+      userId,
+      scheduleId,
+      sentKey,
+      botToken,
+      chatId,
+      message: formatCancellationMessage({
+        title: String(alert.title || 'Train Alert'),
+        origin: routeInfo.origin,
+        destination: routeInfo.destination,
+        target: watch.target,
+        replacement: watch.replacement,
+      }),
+    })) sent += 1;
+  }
+
+  const activeTrain = watch.active;
+
+  for (const offset of dueFixedOffsets(minsUntilDeparture, fixedOffsets, eventName)) {
+    const trainKey = activeTrain?.tripId || activeTrain?.scheduledTime || 'live-unavailable';
+    const sentKey = `${scheduleId}:${todayKey}:fixed-${offset}:${trainKey}`;
+    const message = await buildLiveTrainDetailsMessageForSchedule(userId, scheduleId);
+    if (await sendReservedMessage({
+      userId,
+      scheduleId,
+      sentKey,
+      botToken,
+      chatId,
+      message,
+    })) sent += 1;
+  }
+
+  if (
+    activeTrain &&
+    isRecheckMinute(minsUntilDeparture, delayRecheckMinutes) &&
+    hasMeaningfulChange(previousState, activeTrain)
+  ) {
+    const bucket = Math.floor(now.getTime() / (delayRecheckMinutes * 60 * 1000));
+    const sentKey = `${scheduleId}:${todayKey}:recheck-${bucket}:${activeTrain.tripId || activeTrain.scheduledTime}:${activeTrain.status}:${activeTrain.delayMinutes || 0}`;
+    if (await sendReservedMessage({
+      userId,
+      scheduleId,
+      sentKey,
+      botToken,
+      chatId,
+      message: formatUpdateMessage({
+        title: String(alert.title || 'Train Alert'),
+        origin: routeInfo.origin,
+        destination: routeInfo.destination,
+        departureTime,
+        watch,
+      }),
+    })) sent += 1;
+  }
+
+  return { sent, skippedReason: sent > 0 ? undefined : 'no_due_message_or_duplicate' };
 }
 
 function formatDelayMessage(opts: {

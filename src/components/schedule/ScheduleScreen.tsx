@@ -1,12 +1,15 @@
 import { useEffect, useState } from 'react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { AlertList } from './AlertList';
+import type { ScheduleFilter } from './AlertList';
 import { AlertForm } from './AlertForm';
 import { AlertSummary } from './AlertSummary';
 import { useAppStore } from '@/store/appStore';
 import { toast } from '@/components/shared/toastStore';
 import { hapticSuccess } from '@/lib/haptics';
 import type { AlertFormData } from './AlertForm';
+
+const SCHEDULE_REFRESH_MS = 10_000;
 
 export function ScheduleScreen() {
   const {
@@ -18,7 +21,6 @@ export function ScheduleScreen() {
     updateAlertSchedule,
     pendingAlertPrefill,
     setPendingAlertPrefill,
-    settings,
   } = useAppStore();
   const [showForm, setShowForm] = useState(false);
   const [editingScheduleId, setEditingScheduleId] = useState<string | null>(null);
@@ -29,6 +31,30 @@ export function ScheduleScreen() {
   useEffect(() => {
     loadAlertSchedules();
     loadRouteCards();
+  }, [loadAlertSchedules, loadRouteCards]);
+
+  useEffect(() => {
+    const refresh = () => {
+      loadAlertSchedules();
+      loadRouteCards();
+    };
+
+    const handleVisible = () => {
+      if (document.visibilityState === 'visible') refresh();
+    };
+
+    const intervalId = window.setInterval(() => {
+      if (document.visibilityState === 'visible') refresh();
+    }, SCHEDULE_REFRESH_MS);
+
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', handleVisible);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', handleVisible);
+    };
   }, [loadAlertSchedules, loadRouteCards]);
 
   // Feature 30: Schedule conflict detection
@@ -128,6 +154,20 @@ export function ScheduleScreen() {
     <div>
       <PageHeader title="Schedule" />
       <div className="schedule-content">
+        <div className="scheduler-health">
+          <div>
+            <span className="scheduler-health-label">Scheduler</span>
+            <strong>Cloudflare active</strong>
+          </div>
+          <div>
+            <span className="scheduler-health-label">Cadence</span>
+            <strong>Every 1 min</strong>
+          </div>
+          <div>
+            <span className="scheduler-health-label">Schedules</span>
+            <strong>{alertSchedules.filter((schedule) => schedule.enabled).length} active</strong>
+          </div>
+        </div>
         <button className="btn-primary schedule-new-btn" onClick={() => setShowForm(true)}>
           New Alert
         </button>

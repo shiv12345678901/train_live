@@ -680,6 +680,28 @@ export const useAppStore = create<AppState>()((set, get) => ({
     void get().refreshAllData(true);
   },
 
+
+  updateAlertSchedule: async (id, updates) => {
+    set((state) => {
+      const updated = state.alertSchedules.map((s) =>
+        s.id === id ? { ...s, ...updates, updatedAt: new Date().toISOString() } : s
+      );
+      setLocalAlertSchedules(updated);
+      return { alertSchedules: updated };
+    });
+
+    try {
+      const saved = await updateSchedule(id, updates);
+      set((state) => {
+        const updated = state.alertSchedules.map((s) => s.id === id ? saved : s);
+        setLocalAlertSchedules(updated);
+        return { alertSchedules: updated };
+      });
+    } catch {
+      addPendingOp({ type: 'update_schedule', payload: { id, updates } });
+    }
+  },
+
   toggleAlertSchedule: async (id, enabled) => {
     // Update locally immediately
     set((state) => {
