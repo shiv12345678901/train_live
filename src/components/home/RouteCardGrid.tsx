@@ -85,11 +85,19 @@ export function RouteCardGrid({
   onDelete,
   onPin,
 }: RouteCardGridProps) {
-  // Sort: pinned cards first, then by order
+  // Sort pinned cards first. The most recently pinned route stays at the top,
+  // then older pinned routes and normal saved routes keep their manual order.
   const sortedCards = [...cards].sort((a, b) => {
     if (a.pinned && !b.pinned) return -1;
     if (!a.pinned && b.pinned) return 1;
-    return 0;
+
+    if (a.pinned && b.pinned) {
+      const aPinnedAt = a.pinnedAt ? new Date(a.pinnedAt).getTime() : 0;
+      const bPinnedAt = b.pinnedAt ? new Date(b.pinnedAt).getTime() : 0;
+      if (aPinnedAt !== bPinnedAt) return bPinnedAt - aPinnedAt;
+    }
+
+    return a.order - b.order;
   });
 
   const sortableIds = [...sortedCards.map((c) => c.id), ADD_NEW_ID];

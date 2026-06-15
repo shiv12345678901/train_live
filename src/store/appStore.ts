@@ -1,17 +1,20 @@
 import { create } from 'zustand';
+import { collection, onSnapshot, orderBy, query, type Unsubscribe } from 'firebase/firestore';
 import type { RouteCard, TrainDeparture, AlertSchedule, AlertPrefillData, AppSettings, TransportMode } from '@/types';
 import { fetchRouteCards, createRouteCard, deleteRouteCard as apiDeleteRouteCard, updateRouteOrder, updateRouteCard as apiUpdateRouteCard } from '@/api/routeApi';
 import { fetchLiveTrains as apiFetchLiveTrains } from '@/api/trainApi';
 import { PRESET_STOPS } from '@/data/stops';
 import { fetchSchedules, createSchedule, updateSchedule, deleteSchedule as apiDeleteSchedule } from '@/api/scheduleApi';
 import { saveSettings } from '@/api/settingsApi';
+import { DEFAULT_USER_ID } from '@/api/client';
+import { clientFirestore, isFirebaseRealtimeConfigured } from '@/lib/firebaseClient';
 import {
   getLocalRouteCards, setLocalRouteCards,
   getLocalAlertSchedules, setLocalAlertSchedules,
   getLocalSettings, setLocalSettings,
-  addPendingOp, getPendingOps, removePendingOp, updatePendingOp,
+  addPendingOp, getPendingOps, removePendingOp, removePendingOps, updatePendingOp,
   setLastSyncTime,
-  getCachedLiveTrains, setCachedLiveTrains,
+  getCachedLiveTrains, getCachedLiveTrainUpdatedAt, setCachedRouteLiveTrains,
 } from './localStorage';
 
 interface AppState {
@@ -27,12 +30,16 @@ interface AppState {
   liveTrains: Record<string, TrainDeparture[]>;
   liveTrainsLoading: Record<string, boolean>;
   liveTrainsError: Record<string, string | null>;
-  fetchLiveTrains: (routeId: string, limit?: number) => Promise<void>;
+  liveTrainsUpdatedAt: Record<string, string>;
+  fetchLiveTrains: (routeId: string, limit?: number, force?: boolean) => Promise<void>;
+  refreshAllData: (force?: boolean) => Promise<void>;
+  startRealtimeSync: () => () => void;
 
   // Alert Schedules
   alertSchedules: AlertSchedule[];
   loadAlertSchedules: () => Promise<void>;
   saveAlertSchedule: (schedule: Omit<AlertSchedule, 'id' | 'createdAt' | 'updatedAt'>) => Promise<void>;
+  updateAlertSchedule: (id: string, updates: Partial<AlertSchedule>) => Promise<void>;
   toggleAlertSchedule: (id: string, enabled: boolean) => Promise<void>;
   deleteAlertSchedule: (id: string) => Promise<void>;
 
@@ -46,6 +53,7 @@ interface AppState {
 
   // Sync
   isSyncing: boolean;
+  realtimeEnabled: boolean;
   syncPendingOps: () => Promise<void>;
 }
 
@@ -54,6 +62,67 @@ interface AppState {
  */
 function generateLocalId(): string {
   return `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+export const APP_VISIBLE_REFRESH_MS = 15_000;
+const LIVE_TRAIN_MIN_REFRESH_MS = 12_000;
+const LIVE_TRAIN_BATCH_DELAY_MS = 250;
+const lastLiveTrainFetchAt = new Map<string, number>();
+
+let realtimeUnsubscribe: (() => void) | null = null;
+let refreshAllPromise: Promise<void> | null = null;
+
+function asRouteCard(doc: { id: string; data: () => unknown }): RouteCard {
+  return { id: doc.id, ...(doc.data() as Omit<RouteCard, 'id'>) };
+}
+
+function asAlertSchedule(doc: { id: string; data: () => unknown }): AlertSchedule {
+  return { id: doc.id, ...(doc.data() as Omit<AlertSchedule, 'id'>) };
+}
+
+function pendingDeletedIds(type: 'delete_route' | 'delete_schedule'): Set<string> {
+  return new Set(getPendingOps()
+    .filter((op) => op.type === type)
+    .map((op) => (op.payload as { id?: string }).id)
+    .filter((id): id is string => Boolean(id)));
+}
+
+function removePendingEntityOps(entity: 'route' | 'schedule', id: string): void {
+  removePendingOps((op) => {
+    const payload = op.payload as { id?: string; localId?: string; cardIds?: string[] };
+    if (entity === 'route') {
+      return (
+        (op.type === 'create_route' && payload.localId === id) ||
+        (op.type === 'update_route' && payload.id === id) ||
+        (op.type === 'reorder_routes' && Array.isArray(payload.cardIds) && payload.cardIds.includes(id))
+      );
+    }
+
+    return (
+      (op.type === 'create_schedule' && payload.localId === id) ||
+      (op.type === 'update_schedule' && payload.id === id)
+    );
+  });
+}
+
+async function delay(ms: number): Promise<void> {
+  await new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function mergePendingLocalCreate(entity: 'route' | 'schedule', localId: string, updates: Record<string, unknown>): boolean {
+  let merged = false;
+  for (const op of getPendingOps()) {
+    const payload = op.payload as { localId?: string; card?: Record<string, unknown>; schedule?: Record<string, unknown> };
+    if (entity === 'route' && op.type === 'create_route' && payload.localId === localId && payload.card) {
+      updatePendingOp(op.id, { payload: { ...payload, card: { ...payload.card, ...updates } } });
+      merged = true;
+    }
+    if (entity === 'schedule' && op.type === 'create_schedule' && payload.localId === localId && payload.schedule) {
+      updatePendingOp(op.id, { payload: { ...payload, schedule: { ...payload.schedule, ...updates } } });
+      merged = true;
+    }
+  }
+  return merged;
 }
 
 function remapPendingRouteReferences(localId: string, remoteId: string): void {
@@ -121,11 +190,116 @@ function inferModeFromStops(origin?: string, destination?: string): TransportMod
 }
 
 /**
+ * Keep pinned routes first while preserving manual order elsewhere.
+ */
+function sortRouteCards(cards: RouteCard[]): RouteCard[] {
+  return [...cards].sort((a, b) => {
+    if (a.pinned && !b.pinned) return -1;
+    if (!a.pinned && b.pinned) return 1;
+
+    if (a.pinned && b.pinned) {
+      const aPinnedAt = a.pinnedAt ? new Date(a.pinnedAt).getTime() : 0;
+      const bPinnedAt = b.pinnedAt ? new Date(b.pinnedAt).getTime() : 0;
+      if (aPinnedAt !== bPinnedAt) return bPinnedAt - aPinnedAt;
+    }
+
+    return a.order - b.order;
+  });
+}
+
+function normalizeRouteCard(card: RouteCard): RouteCard {
+  return {
+    ...card,
+    pinned: card.pinned === true,
+    pinnedAt: card.pinned ? card.pinnedAt ?? card.updatedAt ?? card.createdAt ?? null : null,
+  };
+}
+
+/**
  * Migrate route cards — ensure data integrity on load.
  */
 function migrateRouteCards(cards: RouteCard[]): RouteCard[] {
-  // No migration needed currently — all stop ID formats are valid
-  return cards;
+  return sortRouteCards(cards.map(normalizeRouteCard));
+}
+
+function toRouteCardSaveInput(card: RouteCard): Omit<RouteCard, 'id' | 'createdAt' | 'updatedAt'> {
+  return {
+    title: card.title,
+    origin: card.origin,
+    originStopId: card.originStopId,
+    destination: card.destination,
+    destinationStopId: card.destinationStopId,
+    mode: card.mode,
+    routeFilter: card.routeFilter,
+    order: card.order,
+    enabled: card.enabled,
+    pinned: card.pinned === true,
+    pinnedAt: card.pinned === true ? card.pinnedAt ?? card.updatedAt ?? card.createdAt ?? null : null,
+  };
+}
+
+function routeSignature(card: RouteCard): string {
+  return [card.title, card.origin, card.destination]
+    .map((value) => value.trim().toLowerCase())
+    .join('::');
+}
+
+function isNewerRouteCard(local: RouteCard, remote: RouteCard): boolean {
+  return new Date(local.updatedAt).getTime() > new Date(remote.updatedAt).getTime();
+}
+
+function remapLocalAlertScheduleRouteIds(localId: string, remoteId: string): void {
+  const schedules = getLocalAlertSchedules();
+  if (!schedules.some((schedule) => schedule.routeCardId === localId)) return;
+  setLocalAlertSchedules(schedules.map((schedule) =>
+    schedule.routeCardId === localId ? { ...schedule, routeCardId: remoteId } : schedule
+  ));
+}
+
+async function syncLocalRouteCardsToFirestore(localCards: RouteCard[], remoteCards: RouteCard[]): Promise<RouteCard[]> {
+  if (localCards.length === 0) return migrateRouteCards(remoteCards);
+
+  const mergedById = new Map(remoteCards.map((card) => [card.id, normalizeRouteCard(card)]));
+  const remoteSignatures = new Map(remoteCards.map((card) => [routeSignature(card), normalizeRouteCard(card)]));
+
+  for (const localCard of localCards.map(normalizeRouteCard)) {
+    const remoteById = mergedById.get(localCard.id);
+
+    if (remoteById) {
+      const pinnedChanged = localCard.pinned !== remoteById.pinned || (localCard.pinnedAt ?? null) !== (remoteById.pinnedAt ?? null);
+      if (pinnedChanged || isNewerRouteCard(localCard, remoteById)) {
+        const saved = await apiUpdateRouteCard(localCard.id, toRouteCardSaveInput(localCard));
+        mergedById.set(saved.id, normalizeRouteCard(saved));
+      }
+      continue;
+    }
+
+    const remoteBySignature = remoteSignatures.get(routeSignature(localCard));
+    if (remoteBySignature && localCard.id.startsWith('local-')) {
+      remapPendingRouteReferences(localCard.id, remoteBySignature.id);
+      remapLocalAlertScheduleRouteIds(localCard.id, remoteBySignature.id);
+      mergedById.set(remoteBySignature.id, normalizeRouteCard({
+        ...remoteBySignature,
+        pinned: localCard.pinned,
+        pinnedAt: localCard.pinnedAt,
+      }));
+      if (localCard.pinned !== remoteBySignature.pinned || (localCard.pinnedAt ?? null) !== (remoteBySignature.pinnedAt ?? null)) {
+        const saved = await apiUpdateRouteCard(remoteBySignature.id, {
+          pinned: localCard.pinned,
+          pinnedAt: localCard.pinnedAt,
+        });
+        mergedById.set(saved.id, normalizeRouteCard(saved));
+      }
+      continue;
+    }
+
+    const saved = await createRouteCard(toRouteCardSaveInput(localCard));
+    mergedById.set(saved.id, normalizeRouteCard(saved));
+    remapPendingRouteReferences(localCard.id, saved.id);
+    remapLocalAlertScheduleRouteIds(localCard.id, saved.id);
+  }
+
+  return migrateRouteCards([...mergedById.values()]);
 }
 
 export const useAppStore = create<AppState>()((set, get) => ({
@@ -135,19 +309,22 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   loadRouteCards: async () => {
     // Always load from localStorage first (instant)
-    const local = getLocalRouteCards();
+    const local = migrateRouteCards(getLocalRouteCards());
     if (local.length > 0) {
       set({ routeCards: local });
+      setLocalRouteCards(local);
     }
 
-    // Then try to sync from backend (silently, don't spam console)
+    // Then try to sync with Firestore. Local saved routes win when Firestore
+    // is missing them, so existing device routes are uploaded instead of being
+    // left local-only.
     try {
-      const remote = await fetchRouteCards();
-      if (remote.length > 0 || local.length === 0) {
-        set({ routeCards: remote });
-        setLocalRouteCards(remote);
-        setLastSyncTime();
-      }
+      const deletedRouteIds = pendingDeletedIds('delete_route');
+      const remote = migrateRouteCards((await fetchRouteCards()).filter((card) => !deletedRouteIds.has(card.id)));
+      const synced = await syncLocalRouteCardsToFirestore(local.filter((card) => !deletedRouteIds.has(card.id)), remote);
+      set({ routeCards: synced });
+      setLocalRouteCards(synced);
+      setLastSyncTime();
     } catch {
       // Backend unavailable — local data is still displayed, no console noise
     }
@@ -183,6 +360,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
         const nextLiveTrains = { ...state.liveTrains };
         const nextLiveTrainsLoading = { ...state.liveTrainsLoading };
         const nextLiveTrainsError = { ...state.liveTrainsError };
+        const nextLiveTrainsUpdatedAt = { ...state.liveTrainsUpdatedAt };
         if (nextLiveTrains[localCard.id]) {
           nextLiveTrains[savedCard.id] = nextLiveTrains[localCard.id];
           delete nextLiveTrains[localCard.id];
@@ -195,6 +373,10 @@ export const useAppStore = create<AppState>()((set, get) => ({
           nextLiveTrainsError[savedCard.id] = nextLiveTrainsError[localCard.id];
           delete nextLiveTrainsError[localCard.id];
         }
+        if (localCard.id in nextLiveTrainsUpdatedAt) {
+          nextLiveTrainsUpdatedAt[savedCard.id] = nextLiveTrainsUpdatedAt[localCard.id];
+          delete nextLiveTrainsUpdatedAt[localCard.id];
+        }
         setLocalRouteCards(updated);
         setLocalAlertSchedules(updatedSchedules);
         return {
@@ -203,6 +385,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
           liveTrains: nextLiveTrains,
           liveTrainsLoading: nextLiveTrainsLoading,
           liveTrainsError: nextLiveTrainsError,
+          liveTrainsUpdatedAt: nextLiveTrainsUpdatedAt,
         };
       });
       remapPendingRouteReferences(localCard.id, savedCard.id);
@@ -210,6 +393,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
       // Queue for later sync
       addPendingOp({ type: 'create_route', payload: { localId: localCard.id, card } });
     }
+    void get().refreshAllData(true);
   },
 
   updateRouteCard: async (id, updates) => {
@@ -222,12 +406,18 @@ export const useAppStore = create<AppState>()((set, get) => ({
       return { routeCards: updated };
     });
 
+    if (id.startsWith('local-') && mergePendingLocalCreate('route', id, updates as Record<string, unknown>)) {
+      void get().refreshAllData(true);
+      return;
+    }
+
     // Try backend
     try {
       await apiUpdateRouteCard(id, updates);
     } catch {
       addPendingOp({ type: 'update_route', payload: { id, updates } });
     }
+    void get().refreshAllData(true);
   },
 
   reorderRouteCards: async (cardIds) => {
@@ -251,6 +441,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
     } catch {
       addPendingOp({ type: 'reorder_routes', payload: { cardIds } });
     }
+    void get().refreshAllData(true);
   },
 
   deleteRouteCard: async (id) => {
@@ -263,14 +454,19 @@ export const useAppStore = create<AppState>()((set, get) => ({
       return { routeCards: updated, alertSchedules: updatedSchedules };
     });
 
+    removePendingEntityOps('route', id);
+
     // Try backend (skip for local-only items that never synced)
     if (!id.startsWith('local-')) {
+      addPendingOp({ type: 'delete_route', payload: { id } });
       try {
         await apiDeleteRouteCard(id);
+        removePendingOps((op) => op.type === 'delete_route' && (op.payload as { id?: string }).id === id);
       } catch {
-        addPendingOp({ type: 'delete_route', payload: { id } });
+        // Keep pending delete tombstone so Firestore snapshots cannot resurrect it.
       }
     }
+    void get().refreshAllData(true);
   },
 
   // ─── Live Trains ──────────────────────────────────────────────────
@@ -278,8 +474,16 @@ export const useAppStore = create<AppState>()((set, get) => ({
   liveTrains: getCachedLiveTrains(),
   liveTrainsLoading: {},
   liveTrainsError: {},
+  liveTrainsUpdatedAt: getCachedLiveTrainUpdatedAt(),
 
-  fetchLiveTrains: async (routeId, limit) => {
+  fetchLiveTrains: async (routeId, limit, force = false) => {
+    const stateBeforeFetch = get();
+    if (stateBeforeFetch.liveTrainsLoading[routeId]) return;
+
+    const lastFetchedAt = lastLiveTrainFetchAt.get(routeId) || 0;
+    if (!force && Date.now() - lastFetchedAt < LIVE_TRAIN_MIN_REFRESH_MS) return;
+    lastLiveTrainFetchAt.set(routeId, Date.now());
+
     set((state) => ({
       liveTrainsLoading: { ...state.liveTrainsLoading, [routeId]: true },
       liveTrainsError: { ...state.liveTrainsError, [routeId]: null },
@@ -306,10 +510,12 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
       const trains = await apiFetchLiveTrains(routeId, origin, destination, originStopId, destinationStopId, limit, card?.mode || inferModeFromStops(origin, destination));
       set((state) => {
+        const fetchedAt = new Date().toISOString();
         const updatedLiveTrains = { ...state.liveTrains, [routeId]: trains };
-        setCachedLiveTrains(updatedLiveTrains);
+        setCachedRouteLiveTrains(routeId, trains);
         return {
           liveTrains: updatedLiveTrains,
+          liveTrainsUpdatedAt: { ...state.liveTrainsUpdatedAt, [routeId]: fetchedAt },
           liveTrainsLoading: { ...state.liveTrainsLoading, [routeId]: false },
         };
       });
@@ -320,6 +526,73 @@ export const useAppStore = create<AppState>()((set, get) => ({
         liveTrainsLoading: { ...state.liveTrainsLoading, [routeId]: false },
       }));
     }
+  },
+
+  refreshAllData: async (force = false) => {
+    if (refreshAllPromise) return refreshAllPromise;
+
+    refreshAllPromise = (async () => {
+      if (navigator.onLine === false) return;
+      await get().syncPendingOps();
+
+      if (!isFirebaseRealtimeConfigured) {
+        await Promise.allSettled([get().loadRouteCards(), get().loadAlertSchedules()]);
+      }
+
+      const cards = get().routeCards.filter((card) => card.enabled !== false);
+      for (const card of cards) {
+        await get().fetchLiveTrains(card.id, undefined, force);
+        if (cards.length > 1) await delay(LIVE_TRAIN_BATCH_DELAY_MS);
+      }
+    })().finally(() => {
+      refreshAllPromise = null;
+    });
+
+    return refreshAllPromise;
+  },
+
+  startRealtimeSync: () => {
+    if (realtimeUnsubscribe) return realtimeUnsubscribe;
+    if (!clientFirestore || !isFirebaseRealtimeConfigured) {
+      set({ realtimeEnabled: false });
+      return () => undefined;
+    }
+
+    const routeCardsQuery = query(
+      collection(clientFirestore, 'users', DEFAULT_USER_ID, 'routeCards'),
+      orderBy('order')
+    );
+    const schedulesQuery = collection(clientFirestore, 'users', DEFAULT_USER_ID, 'alertSchedules');
+
+    const unsubscribeRoutes: Unsubscribe = onSnapshot(routeCardsQuery, (snapshot) => {
+      const deletedRouteIds = pendingDeletedIds('delete_route');
+      const cards = migrateRouteCards(snapshot.docs.map(asRouteCard).filter((card) => !deletedRouteIds.has(card.id)));
+      set({ routeCards: cards, realtimeEnabled: true });
+      setLocalRouteCards(cards);
+      setLastSyncTime();
+      void get().refreshAllData(true);
+    }, () => {
+      set({ realtimeEnabled: false });
+    });
+
+    const unsubscribeSchedules: Unsubscribe = onSnapshot(schedulesQuery, (snapshot) => {
+      const deletedScheduleIds = pendingDeletedIds('delete_schedule');
+      const schedules = snapshot.docs.map(asAlertSchedule).filter((schedule) => !deletedScheduleIds.has(schedule.id));
+      set({ alertSchedules: schedules, realtimeEnabled: true });
+      setLocalAlertSchedules(schedules);
+      setLastSyncTime();
+    }, () => {
+      set({ realtimeEnabled: false });
+    });
+
+    realtimeUnsubscribe = () => {
+      unsubscribeRoutes();
+      unsubscribeSchedules();
+      realtimeUnsubscribe = null;
+      set({ realtimeEnabled: false });
+    };
+
+    return realtimeUnsubscribe;
   },
 
   // ─── Alert Schedules (offline-first) ──────────────────────────────
@@ -335,7 +608,8 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
     // Try to sync from backend
     try {
-      const remote = await fetchSchedules();
+      const deletedScheduleIds = pendingDeletedIds('delete_schedule');
+      const remote = (await fetchSchedules()).filter((schedule) => !deletedScheduleIds.has(schedule.id));
       if (remote.length > 0 || local.length === 0) {
         set({ alertSchedules: remote });
         setLocalAlertSchedules(remote);
@@ -375,6 +649,35 @@ export const useAppStore = create<AppState>()((set, get) => ({
     } catch {
       addPendingOp({ type: 'create_schedule', payload: { localId: localSchedule.id, schedule } });
     }
+    void get().refreshAllData(true);
+  },
+
+
+  updateAlertSchedule: async (id, updates) => {
+    set((state) => {
+      const updated = state.alertSchedules.map((s) =>
+        s.id === id ? { ...s, ...updates, updatedAt: new Date().toISOString() } : s
+      );
+      setLocalAlertSchedules(updated);
+      return { alertSchedules: updated };
+    });
+
+    if (id.startsWith('local-') && mergePendingLocalCreate('schedule', id, updates as Record<string, unknown>)) {
+      void get().refreshAllData(true);
+      return;
+    }
+
+    try {
+      const saved = await updateSchedule(id, updates);
+      set((state) => {
+        const updated = state.alertSchedules.map((s) => s.id === id ? saved : s);
+        setLocalAlertSchedules(updated);
+        return { alertSchedules: updated };
+      });
+    } catch {
+      addPendingOp({ type: 'update_schedule', payload: { id, updates } });
+    }
+    void get().refreshAllData(true);
   },
 
   toggleAlertSchedule: async (id, enabled) => {
@@ -387,12 +690,18 @@ export const useAppStore = create<AppState>()((set, get) => ({
       return { alertSchedules: updated };
     });
 
+    if (id.startsWith('local-') && mergePendingLocalCreate('schedule', id, { enabled })) {
+      void get().refreshAllData(true);
+      return;
+    }
+
     // Try backend
     try {
       await updateSchedule(id, { enabled });
     } catch {
       addPendingOp({ type: 'update_schedule', payload: { id, updates: { enabled } } });
     }
+    void get().refreshAllData(true);
   },
 
   deleteAlertSchedule: async (id) => {
@@ -403,14 +712,19 @@ export const useAppStore = create<AppState>()((set, get) => ({
       return { alertSchedules: updated };
     });
 
+    removePendingEntityOps('schedule', id);
+
     // Try backend
     if (!id.startsWith('local-')) {
+      addPendingOp({ type: 'delete_schedule', payload: { id } });
       try {
         await apiDeleteSchedule(id);
+        removePendingOps((op) => op.type === 'delete_schedule' && (op.payload as { id?: string }).id === id);
       } catch {
-        addPendingOp({ type: 'delete_schedule', payload: { id } });
+        // Keep pending delete tombstone so Firestore snapshots cannot resurrect it.
       }
     }
+    void get().refreshAllData(true);
   },
 
   // ─── Navigation Context ───────────────────────────────────────────
@@ -447,8 +761,10 @@ export const useAppStore = create<AppState>()((set, get) => ({
   // ─── Sync Engine ──────────────────────────────────────────────────
 
   isSyncing: false,
+  realtimeEnabled: false,
 
   syncPendingOps: async () => {
+    if (get().isSyncing) return;
     const ops = getPendingOps();
     if (ops.length === 0) return;
 
@@ -474,6 +790,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
               const nextLiveTrains = { ...state.liveTrains };
               const nextLiveTrainsLoading = { ...state.liveTrainsLoading };
               const nextLiveTrainsError = { ...state.liveTrainsError };
+              const nextLiveTrainsUpdatedAt = { ...state.liveTrainsUpdatedAt };
               if (nextLiveTrains[localId]) {
                 nextLiveTrains[saved.id] = nextLiveTrains[localId];
                 delete nextLiveTrains[localId];
@@ -486,6 +803,10 @@ export const useAppStore = create<AppState>()((set, get) => ({
                 nextLiveTrainsError[saved.id] = nextLiveTrainsError[localId];
                 delete nextLiveTrainsError[localId];
               }
+              if (localId in nextLiveTrainsUpdatedAt) {
+                nextLiveTrainsUpdatedAt[saved.id] = nextLiveTrainsUpdatedAt[localId];
+                delete nextLiveTrainsUpdatedAt[localId];
+              }
               setLocalRouteCards(updated);
               setLocalAlertSchedules(updatedSchedules);
               return {
@@ -494,6 +815,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
                 liveTrains: nextLiveTrains,
                 liveTrainsLoading: nextLiveTrainsLoading,
                 liveTrainsError: nextLiveTrainsError,
+                liveTrainsUpdatedAt: nextLiveTrainsUpdatedAt,
               };
             });
             remapPendingRouteReferences(localId, saved.id);

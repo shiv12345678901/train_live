@@ -1,4 +1,4 @@
-import { handleCors, CORS_HEADERS } from '../../lib/cors';
+import { handleCors } from '../../lib/cors';
 import type { Handler } from '@netlify/functions';
 import { getDb, getRouteCardsRef } from '../../lib/firestore';
 import { parseJsonObject } from '../../lib/validation';

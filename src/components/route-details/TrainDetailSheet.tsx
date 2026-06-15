@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { TrainDeparture } from '@/types';
+import { formatTransportTime } from '@/utils/timeUtils';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '/.netlify/functions';
 
@@ -28,8 +29,7 @@ interface TrainDetailSheetProps {
 }
 
 function formatTime(iso: string): string {
-  const d = new Date(iso);
-  return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
+  return formatTransportTime(iso, '');
 }
 
 function cleanName(name: string): string {

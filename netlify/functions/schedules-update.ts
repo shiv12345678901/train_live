@@ -1,4 +1,4 @@
-import { handleCors, CORS_HEADERS } from '../../lib/cors';
+import { handleCors } from '../../lib/cors';
 import type { Handler } from '@netlify/functions';
 import { getAlertSchedulesRef } from '../../lib/firestore';
 import { parseJsonObject, scheduleUpdates } from '../../lib/validation';

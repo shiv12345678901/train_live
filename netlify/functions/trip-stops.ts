@@ -15,6 +15,23 @@ interface ApiRecord {
   [key: string]: unknown;
 }
 
+const NSW_TIME_ZONE = 'Australia/Sydney';
+
+function getSydneyDateParts(date: Date): Record<string, string> {
+  return Object.fromEntries(
+    new Intl.DateTimeFormat('en-AU', {
+      timeZone: NSW_TIME_ZONE,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+      hourCycle: 'h23',
+    }).formatToParts(date).map((part) => [part.type, part.value])
+  );
+}
+
 /**
  * Trip Stops endpoint — returns the full stop sequence for a specific service.
  * Uses the Trip Planner API with origin/destination to get stopSequence
@@ -174,16 +191,9 @@ function buildTripTimeParams(scheduledTime: string): string {
     return '';
   }
 
-  const dateStr =
-    `${d.getFullYear()}` +
-    `${String(d.getMonth() + 1).padStart(2, '0')}` +
-    `${String(d.getDate()).padStart(2, '0')}`;
+  const parts = getSydneyDateParts(d);
 
-  const timeStr =
-    `${String(d.getHours()).padStart(2, '0')}` +
-    `${String(d.getMinutes()).padStart(2, '0')}`;
-
-  return `&itdDate=${dateStr}&itdTime=${timeStr}`;
+  return `&itdDate=${parts.year}${parts.month}${parts.day}&itdTime=${parts.hour}${parts.minute}`;
 }
 
 function findBestMatchingLeg(

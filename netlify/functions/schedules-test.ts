@@ -1,4 +1,4 @@
-import { handleCors, CORS_HEADERS } from '../../lib/cors';
+import { handleCors } from '../../lib/cors';
 import type { Handler } from '@netlify/functions';
 import { getAlertSchedulesRef, getSettingsRef } from '../../lib/firestore';
 import { sendMessageWithRetry } from '../../lib/telegram';
@@ -36,10 +36,15 @@ const handler: Handler = async (event) => {
     const settingsDoc = await getSettingsRef(userId).get();
     const settings = settingsDoc.data();
 
-    if (!settings?.telegramBotToken || !settings?.telegramChatId) {
+    const botToken = settings?.telegramBotToken || process.env.TELEGRAM_BOT_TOKEN;
+    const chatId = settings?.telegramChatId || process.env.TELEGRAM_CHAT_ID;
+
+    if (!botToken || !chatId) {
       return {
         statusCode: 400,
-        body: JSON.stringify({ error: 'Telegram bot token and chat ID must be configured in settings' }),
+        body: JSON.stringify({
+          error: 'Telegram bot token and chat ID must be configured in settings or Netlify environment variables',
+        }),
       };
     }
 
@@ -54,15 +59,15 @@ const handler: Handler = async (event) => {
     ].join('\n');
 
     const success = await sendMessageWithRetry(
-      settings.telegramBotToken,
-      settings.telegramChatId,
+      botToken,
+      chatId,
       testMessage
     );
 
     if (success) {
       return {
         statusCode: 200,
-        body: JSON.stringify({ success: true, message: 'Test message sent successfully' }),
+        body: JSON.stringify({ success: true, message: 'Test message sent successfully', credentialSource: settings?.telegramBotToken && settings?.telegramChatId ? 'settings' : 'environment' }),
       };
     } else {
       return {

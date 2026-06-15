@@ -2,6 +2,7 @@ import { useState, useRef, useCallback } from 'react';
 import type { RouteCard as RouteCardType, TrainDeparture, TransportMode } from '@/types';
 import { useCountdown, formatCountdown } from '@/hooks/useCountdown';
 import { hapticMedium } from '@/lib/haptics';
+import { formatTransportTime } from '@/utils/timeUtils';
 
 interface RouteCardProps {
   card: RouteCardType;
@@ -12,12 +13,6 @@ interface RouteCardProps {
   onPin?: () => void;
   onDelete?: () => void;
   index?: number;
-}
-
-function formatTime(isoTime: string): string {
-  const date = new Date(isoTime);
-  if (Number.isNaN(date.getTime())) return 'Live time unavailable';
-  return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
 }
 
 function RouteModeIcon({ mode }: { mode: TransportMode }) {
@@ -186,7 +181,7 @@ export function RouteCard({ card, alertStatus, nextTrain, onClick, onEdit, onDel
             {displayTime ? (
               <>
                 <LiveCountdownPill isoTime={displayTime} />
-                <span className="route-card-next-value">{formatTime(displayTime)}</span>
+                <span className="route-card-next-value">{formatTransportTime(displayTime)}</span>
                 {statusDetail && <span className="route-card-next-detail">{statusDetail}</span>}
               </>
             ) : (

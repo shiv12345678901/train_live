@@ -1,7 +1,7 @@
 // Service Worker for Train Live PWA
 // Features: offline caching, background sync, app shell caching
 
-const CACHE_NAME = 'trainlive-v1';
+const CACHE_NAME = 'trainlive-v2';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -32,32 +32,15 @@ self.addEventListener('fetch', (event) => {
   // Only handle http/https requests — skip chrome-extension:// etc.
   if (!url.protocol.startsWith('http')) return;
 
-  // API requests: network first, cache fallback
+  // API requests: always use network. User data and live ETAs are managed by
+  // the app's localStorage cache so the service worker must not resurrect stale
+  // route/schedule responses after edits or deletes.
   if (url.pathname.includes('.netlify/functions/')) {
     event.respondWith(
-      fetch(event.request)
-        .then((response) => {
-          // Cache successful GET responses
-          if (event.request.method === 'GET' && response.ok) {
-            const clone = response.clone();
-            caches.open(CACHE_NAME).then((cache) => {
-              cache.put(event.request, clone);
-            });
-          }
-          return response;
-        })
-        .catch(() => {
-          // Return cached response if available
-          return caches.match(event.request).then((cached) => {
-            if (cached) {
-              return cached;
-            }
-            return new Response(JSON.stringify({ error: 'Offline', cached: false }), {
-              status: 503,
-              headers: { 'Content-Type': 'application/json' },
-            });
-          });
-        })
+      fetch(event.request).catch(() => new Response(JSON.stringify({ error: 'Offline', cached: false }), {
+        status: 503,
+        headers: { 'Content-Type': 'application/json' },
+      }))
     );
     return;
   }
