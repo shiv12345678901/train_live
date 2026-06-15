@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import type { AlertSchedule, RouteCard } from '@/types';
 import { useAppStore } from '@/store/appStore';
 import { testAlert } from '@/api/scheduleApi';
@@ -8,7 +8,7 @@ export type ScheduleFilter = 'active' | 'paused' | 'today' | 'one-time' | 'recur
 interface AlertListProps {
   schedules: AlertSchedule[];
   routeCards: RouteCard[];
-  filter: ScheduleFilter;
+  telegramConfigured: boolean;
   expandedId?: string | null;
   onExpand: (id: string | null) => void;
   onEdit: (schedule: AlertSchedule) => void;
@@ -152,7 +152,23 @@ function matchesFilter(schedule: AlertSchedule, filter: ScheduleFilter): boolean
   return isCompleted(schedule);
 }
 
-export function AlertList({ schedules, routeCards, filter, expandedId, onExpand, onEdit }: AlertListProps) {
+type SendState = 'idle' | 'sending' | 'sent' | 'error';
+
+function formatDays(schedule: AlertSchedule): string {
+  if (schedule.oneTimeDate) return schedule.oneTimeDate;
+  if (schedule.days.length === 0) return 'No repeat days';
+  if (schedule.days.length === 5 && [1, 2, 3, 4, 5].every((day) => schedule.days.includes(day))) return 'Weekdays';
+  if (schedule.days.length === 7) return 'Daily';
+  return schedule.days.map((d) => DAY_LABELS[d]).join(', ');
+}
+
+function routeLabel(schedule: AlertSchedule, routeCards: RouteCard[]): string {
+  const route = routeCards.find((card) => card.id === schedule.routeCardId);
+  if (!route) return 'Saved route';
+  return `${route.origin.replace(/\s*Station\s*/gi, '')} → ${route.destination.replace(/\s*Station\s*/gi, '')}`;
+}
+
+export function AlertList({ schedules, routeCards, telegramConfigured, expandedId, onExpand, onEdit }: AlertListProps) {
   const { toggleAlertSchedule, deleteAlertSchedule } = useAppStore();
   const [sendState, setSendState] = useState<Record<string, SendState>>({});
 
@@ -178,8 +194,11 @@ export function AlertList({ schedules, routeCards, filter, expandedId, onExpand,
     try {
       await testAlert(id);
       setSendState((state) => ({ ...state, [id]: 'sent' }));
-    } catch (error) {
-      console.error('Send now failed', error);
+      window.setTimeout(() => {
+        setSendState((state) => ({ ...state, [id]: 'idle' }));
+      }, 2500);
+    } catch (e) {
+      console.error('Send now failed', e);
       setSendState((state) => ({ ...state, [id]: 'error' }));
     }
   };
@@ -187,35 +206,29 @@ export function AlertList({ schedules, routeCards, filter, expandedId, onExpand,
   if (visibleSchedules.length === 0) {
     return (
       <div className="alert-list-empty">
-        <p>No alerts in this view.</p>
-        <p className="alert-list-empty-hint">Create a new alert or switch filters.</p>
+        <p>No alerts scheduled yet.</p>
+        <p className="alert-list-empty-hint">Tap “New Alert” or use the bell on a train card to watch a service.</p>
       </div>
     );
   }
 
   return (
     <div className="alert-list">
-      {visibleSchedules.map((schedule) => {
+      {[...schedules].sort((a, b) => a.departureTime.localeCompare(b.departureTime)).map((schedule) => {
         const isExpanded = expandedId === schedule.id;
         const status = sendState[schedule.id] || 'idle';
-        const isLocal = schedule.id.startsWith('local-');
-        const activity = sentActivity(schedule);
+        const meta = [schedule.targetRoute, schedule.selectedPlatform ? `Platform ${schedule.selectedPlatform}` : ''].filter(Boolean).join(' • ');
 
         return (
           <article key={schedule.id} className={`alert-list-item ${isExpanded ? 'is-expanded' : ''}`}>
             <button className="alert-list-item-main" type="button" onClick={() => onExpand(isExpanded ? null : schedule.id)}>
               <div className="alert-list-item-header">
-                <span className="alert-list-item-title">{routeLabel(schedule, routeCards)}</span>
-                <span className={`alert-list-status ${schedule.enabled ? 'is-active' : 'is-paused'}`}>
-                  {isCompleted(schedule) ? 'Completed' : schedule.enabled ? 'Active' : 'Paused'}
-                </span>
+                <span className="alert-list-item-title">{schedule.title}</span>
+                <span className="alert-list-item-time">{schedule.departureTime}</span>
               </div>
-              <div className="alert-list-card-grid">
-                <span><b>Departure</b>{formatTime(schedule.departureTime)}</span>
-                <span><b>Next alert</b>{nextAlert(schedule)}</span>
-                <span><b>Matched train</b>{matchedTrain(schedule)}</span>
-                <span><b>Sync</b>{syncState(schedule)}</span>
-              </div>
+              <div className="alert-list-item-days">{formatDays(schedule)}</div>
+              <div className="alert-list-item-route">{routeLabel(schedule, routeCards)}</div>
+              {meta && <div className="alert-list-item-platform">{meta}</div>}
             </button>
 
             <div className="alert-list-item-actions">
@@ -223,8 +236,7 @@ export function AlertList({ schedules, routeCards, filter, expandedId, onExpand,
                 <input
                   type="checkbox"
                   checked={schedule.enabled}
-                  onChange={() => toggleAlertSchedule(schedule.id, !schedule.enabled)}
-                  disabled={isCompleted(schedule)}
+                  onChange={() => handleToggle(schedule.id, schedule.enabled)}
                 />
                 <span className="alert-toggle-slider" />
               </label>
@@ -232,15 +244,10 @@ export function AlertList({ schedules, routeCards, filter, expandedId, onExpand,
 
             {isExpanded && (
               <div className="alert-list-detail">
-                <div className="alert-timeline">
-                  {ALERT_OFFSETS.map((offset) => (
-                    <span key={offset} className="alert-timeline-step">{offset} min</span>
-                  ))}
-                </div>
                 <div className="alert-list-detail-grid">
                   <div>
-                    <span className="alert-detail-label">Schedule</span>
-                    <strong>{formatDays(schedule)}</strong>
+                    <span className="alert-detail-label">Reminders</span>
+                    <strong>{schedule.fixedReminderMinutes.join(', ')} min before</strong>
                   </div>
                   <div>
                     <span className="alert-detail-label">Delay checks</span>
@@ -248,38 +255,30 @@ export function AlertList({ schedules, routeCards, filter, expandedId, onExpand,
                   </div>
                   <div>
                     <span className="alert-detail-label">Fallback</span>
-                    <strong>+/-{schedule.fallbackWindowMinutes || 5} min replacement</strong>
+                    <strong>±{schedule.fallbackWindowMinutes || 5} min replacement</strong>
                   </div>
                   <div>
-                    <span className="alert-detail-label">Saved</span>
-                    <strong>{new Date(schedule.updatedAt).toLocaleString('en-AU', { dateStyle: 'medium', timeStyle: 'short' })}</strong>
+                    <span className="alert-detail-label">Status</span>
+                    <strong>{schedule.enabled ? 'Active' : 'Paused'}</strong>
                   </div>
                 </div>
-                <div className={`alert-list-activity alert-list-activity-${status}`}>
+                <div className="alert-list-activity">
                   <span className="alert-detail-label">Activity</span>
-                  <p>{sendStatusText(status, isLocal)}</p>
-                  {activity.length > 0 && (
-                    <ul className="alert-activity-list">
-                      {activity.map((item, index) => (
-                        <li key={`${item.title}-${index}`}>
-                          <strong>{item.title}</strong>
-                          {item.body && <span>{item.body}</span>}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
+                  <p>Telegram checks are handled by the scheduler. Use “Send now” to verify your bot/channel setup immediately.</p>
                 </div>
                 <div className="alert-list-detail-actions">
-                  <button className="btn-secondary alert-detail-btn" type="button" onClick={() => onEdit(schedule)} disabled={isCompleted(schedule)}>Edit</button>
-                  <button
-                    className={`btn-primary alert-detail-btn ${status === 'sending' ? 'is-sending' : ''}`}
-                    type="button"
-                    onClick={() => handleSendNow(schedule.id)}
-                    disabled={status === 'sending' || isLocal || isCompleted(schedule)}
-                  >
-                    {status === 'sending' ? 'Sending...' : status === 'sent' ? 'Sent' : status === 'error' ? 'Try again' : 'Send now'}
-                  </button>
-                  <button className="alert-list-item-delete-btn alert-detail-delete-btn" onClick={() => handleDelete(schedule.id)} title="Delete alert" type="button">Delete</button>
+                  <button className="btn-secondary alert-detail-btn" type="button" onClick={() => onEdit(schedule)}>Edit</button>
+                  {telegramConfigured && (
+                    <button
+                      className={`btn-primary alert-detail-btn ${status === 'sending' ? 'is-sending' : ''}`}
+                      type="button"
+                      onClick={() => handleSendNow(schedule.id)}
+                      disabled={status === 'sending'}
+                    >
+                      {status === 'sending' ? 'Sending…' : status === 'sent' ? 'Sent' : status === 'error' ? 'Try again' : 'Send now'}
+                    </button>
+                  )}
+                  <button className="alert-list-item-delete-btn" onClick={() => handleDelete(schedule.id)} title="Delete alert" type="button">Delete</button>
                 </div>
               </div>
             )}

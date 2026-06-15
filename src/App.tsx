@@ -6,12 +6,14 @@ import { ScheduleScreen } from '@/components/schedule/ScheduleScreen';
 import { SettingsScreen } from '@/components/settings/SettingsScreen';
 import { ErrorBoundary } from '@/components/shared/ErrorBoundary';
 import { RoutePersistence } from '@/components/layout/RoutePersistence';
+import { AppDataSync } from '@/components/layout/AppDataSync';
 
 function App() {
   return (
     <ErrorBoundary>
       <BrowserRouter>
         <RoutePersistence />
+        <AppDataSync />
         <Routes>
           <Route element={<AppShell />}>
             <Route index element={<HomeScreen />} />

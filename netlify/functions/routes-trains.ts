@@ -391,20 +391,49 @@ const handler: Handler = async (event) => {
       };
     }
 
-    const departures = await fetchRouteTrainDepartures({
-      apiKey,
-      origin,
-      destination,
-      originStopId,
-      destinationStopId,
-      mode: selectedMode,
-      limit: resultLimit,
-    });
+    let resolvedOriginId = originStopId;
+    let resolvedDestId = destinationStopId;
+
+    if (!resolvedOriginId) {
+      resolvedOriginId = await resolveStopId(apiKey, origin);
+    }
+
+    if (!resolvedDestId) {
+      resolvedDestId = await resolveStopId(apiKey, destination);
+    }
+
+    // Strategy: Use Departure Monitor for bulk results (like Opal app does).
+    // DM returns 40+ departures. We filter by destination using onwardLocations.
+    // Fall back to Trip Planner only if DM returns nothing.
+    let departures: TrainDeparture[] = [];
+
+    if (resolvedOriginId) {
+      departures = await fetchViaDepartureMonitor(
+        apiKey, origin, destination, resolvedOriginId, resolvedDestId, selectedMode, resultLimit
+      );
+    }
+
+    // If DM doesn't fill the page, supplement with Trip Planner batches.
+    // Future batches use explicit Sydney-local itdDate/itdTime parameters so
+    // low-frequency routes can show later today and tomorrow instead of stopping
+    // after the short live departure window.
+    if (departures.length < resultLimit) {
+      departures = await fetchTripPlannerScheduleWindow(
+        apiKey,
+        origin,
+        destination,
+        resolvedOriginId,
+        resolvedDestId,
+        selectedMode,
+        resultLimit,
+        departures
+      );
+    }
 
     return {
       statusCode: 200,
       headers: CORS_HEADERS,
-      body: JSON.stringify(departures),
+      body: JSON.stringify(dedupeAndSortDepartures(departures).slice(0, resultLimit)),
     };
   } catch (error) {
     const msg = error instanceof Error ? error.message : 'Unknown error';

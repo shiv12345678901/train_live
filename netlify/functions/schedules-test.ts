@@ -174,9 +174,21 @@ const handler: Handler = async (event) => {
       };
     }
 
-    const testMessage = await buildLiveTrainDetailsMessageForSchedule(userId, cleanScheduleId);
+    const schedule = scheduleDoc.data();
+    const testMessage = [
+      `✅ <b>Test Alert</b>`,
+      ``,
+      `This is a test message for: <b>${schedule?.title || 'Unknown'}</b>`,
+      `Departure: ${schedule?.departureTime || 'N/A'}`,
+      ``,
+      `Your alerts are working correctly!`,
+    ].join('\n');
 
-    const success = await sendMessageWithRetry(botToken, chatId, testMessage);
+    const success = await sendMessageWithRetry(
+      botToken,
+      chatId,
+      testMessage
+    );
 
     if (success) {
       await getAlertDeliveryStateRef(userId).doc(cleanScheduleId).set({
@@ -191,11 +203,12 @@ const handler: Handler = async (event) => {
 
       return {
         statusCode: 200,
-        body: JSON.stringify({
-          success: true,
-          message: 'Test message sent successfully',
-          credentialSource: settings?.telegramBotToken && settings?.telegramChatId ? 'settings' : 'environment',
-        }),
+        body: JSON.stringify({ success: true, message: 'Test message sent successfully', credentialSource: settings?.telegramBotToken && settings?.telegramChatId ? 'settings' : 'environment' }),
+      };
+    } else {
+      return {
+        statusCode: 502,
+        body: JSON.stringify({ success: false, error: 'Failed to send test message via Telegram' }),
       };
     }
 

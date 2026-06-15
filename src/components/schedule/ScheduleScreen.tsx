@@ -25,7 +25,6 @@ export function ScheduleScreen() {
   const [showForm, setShowForm] = useState(false);
   const [editingScheduleId, setEditingScheduleId] = useState<string | null>(null);
   const [expandedScheduleId, setExpandedScheduleId] = useState<string | null>(null);
-  const [filter, setFilter] = useState<ScheduleFilter>('active');
   const editingSchedule = editingScheduleId ? alertSchedules.find((schedule) => schedule.id === editingScheduleId) || null : null;
   const isFormOpen = showForm || Boolean(pendingAlertPrefill) || Boolean(editingSchedule);
 
@@ -172,22 +171,10 @@ export function ScheduleScreen() {
         <button className="btn-primary schedule-new-btn" onClick={() => setShowForm(true)}>
           New Alert
         </button>
-        <div className="schedule-filter-tabs" role="tablist" aria-label="Schedule filters">
-          {(['active', 'today', 'paused', 'one-time', 'recurring', 'completed'] as ScheduleFilter[]).map((item) => (
-            <button
-              key={item}
-              className={`schedule-filter-tab ${filter === item ? 'is-active' : ''}`}
-              type="button"
-              onClick={() => setFilter(item)}
-            >
-              {item.replace('-', ' ')}
-            </button>
-          ))}
-        </div>
         <AlertList
           schedules={alertSchedules}
           routeCards={routeCards}
-          filter={filter}
+          telegramConfigured={settings.telegramConnected}
           expandedId={expandedScheduleId}
           onExpand={setExpandedScheduleId}
           onEdit={(schedule) => { setEditingScheduleId(schedule.id); setShowForm(true); }}

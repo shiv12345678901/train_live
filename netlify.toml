@@ -27,7 +27,12 @@
 [[headers]]
   for = "/.netlify/functions/routes-list"
   [headers.values]
-    Cache-Control = "private, max-age=10"
+    Cache-Control = "no-store"
+
+[[headers]]
+  for = "/.netlify/functions/schedules-list"
+  [headers.values]
+    Cache-Control = "no-store"
 
 [[headers]]
   for = "/.netlify/functions/stops-search"

@@ -12,6 +12,7 @@ export async function requestJson<T>(path: string, init: RequestInit = {}): Prom
     let res: Response;
     try {
       res = await fetch(`${API_BASE}${path}`, {
+        cache: 'no-store',
         ...init,
         headers: {
           'x-user-id': DEFAULT_USER_ID,
@@ -43,6 +44,7 @@ export async function requestVoid(path: string, init: RequestInit = {}): Promise
   let res: Response;
   try {
     res = await fetch(`${API_BASE}${path}`, {
+      cache: 'no-store',
       ...init,
       headers: {
         'x-user-id': DEFAULT_USER_ID,

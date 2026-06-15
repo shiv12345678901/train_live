@@ -37,8 +37,6 @@ export type AlertSchedule = {
   delayRecheckMinutes?: number;
   fallbackWindowMinutes?: number;
   notifyOnCancellationImmediately?: boolean;
-  deliveryState?: AlertDeliveryState;
-  cloudflareIndexed?: boolean;
   createdAt: string;
   updatedAt: string;
 };
