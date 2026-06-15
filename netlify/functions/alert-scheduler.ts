@@ -724,33 +724,6 @@ function formatDelayMessage(opts: {
   return lines.join('\n');
 }
 
-async function sendReservedMessage(opts: {
-  userId: string;
-  scheduleId: string;
-  sentKey: string;
-  botToken: string;
-  chatId: string;
-  message: string;
-}): Promise<boolean> {
-  const { userId, scheduleId, sentKey, botToken, chatId, message } = opts;
-  if (!await reserveSentKey(userId, scheduleId, sentKey)) return false;
-  const sent = await sendMessageWithRetry(botToken, chatId, message);
-  if (!sent) await releaseSentKey(userId, scheduleId, sentKey);
-  return sent;
-}
-
-async function routeInfoForSchedule(userId: string, routeCardId: string): Promise<RouteInfo | null> {
-  if (!routeCardId) return null;
-  const cardDoc = await getRouteCardsRef(userId).doc(routeCardId).get();
-  if (!cardDoc.exists) return null;
-  const cardData = cardDoc.data()!;
-  return {
-    origin: cardData.origin || '',
-    destination: cardData.destination || '',
-    originStopId: cardData.originStopId || '',
-    destinationStopId: cardData.destinationStopId || '',
-  };
-}
 
 // ─── Main Scheduler ─────────────────────────────────────────────────
 
