@@ -104,6 +104,11 @@ export function removePendingOp(opId: string): void {
   write(KEYS.pendingOps, ops);
 }
 
+export function removePendingOps(predicate: (op: PendingOp) => boolean): void {
+  const ops = getPendingOps().filter((op) => !predicate(op));
+  write(KEYS.pendingOps, ops);
+}
+
 export function updatePendingOp(opId: string, updates: Partial<PendingOp>): void {
   const ops = getPendingOps().map((op) =>
     op.id === opId ? { ...op, ...updates } : op

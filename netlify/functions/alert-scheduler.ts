@@ -705,6 +705,53 @@ export async function runAlertSchedulerForSchedule(
   return { sent, skippedReason: sent > 0 ? undefined : 'no_due_message_or_duplicate' };
 }
 
+function formatDelayMessage(opts: {
+  title: string;
+  origin: string;
+  destination: string;
+  train: LiveTrain;
+}): string {
+  const { title, origin, destination, train } = opts;
+  const lines = [
+    `⚠️ <b>${title} — Delay update</b>`,
+    ``,
+    `${shortStop(origin)} → ${shortStop(destination)}`,
+    trainLine(train),
+    `Delayed ${train.delayMinutes || '?'} min`,
+    `Next check in 2 min while delayed.`,
+  ];
+
+  return lines.join('\n');
+}
+
+async function sendReservedMessage(opts: {
+  userId: string;
+  scheduleId: string;
+  sentKey: string;
+  botToken: string;
+  chatId: string;
+  message: string;
+}): Promise<boolean> {
+  const { userId, scheduleId, sentKey, botToken, chatId, message } = opts;
+  if (!await reserveSentKey(userId, scheduleId, sentKey)) return false;
+  const sent = await sendMessageWithRetry(botToken, chatId, message);
+  if (!sent) await releaseSentKey(userId, scheduleId, sentKey);
+  return sent;
+}
+
+async function routeInfoForSchedule(userId: string, routeCardId: string): Promise<RouteInfo | null> {
+  if (!routeCardId) return null;
+  const cardDoc = await getRouteCardsRef(userId).doc(routeCardId).get();
+  if (!cardDoc.exists) return null;
+  const cardData = cardDoc.data()!;
+  return {
+    origin: cardData.origin || '',
+    destination: cardData.destination || '',
+    originStopId: cardData.originStopId || '',
+    destinationStopId: cardData.destinationStopId || '',
+  };
+}
+
 // ─── Main Scheduler ─────────────────────────────────────────────────
 
 export const runAlertScheduler: Handler = async () => {

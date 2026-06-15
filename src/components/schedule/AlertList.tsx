@@ -92,14 +92,14 @@ function matchedTrain(schedule: AlertSchedule): string {
       state.platform ? `Platform ${state.platform}` : null,
       state.status,
     ].filter(Boolean);
-    return pieces.join(' · ');
+    return pieces.join(' - ');
   }
   if (schedule.selectedTripId || schedule.selectedPlatform || schedule.targetRoute) {
     const pieces = [
       schedule.targetRoute || 'Selected train-card service',
       schedule.selectedPlatform ? `Platform ${schedule.selectedPlatform}` : null,
     ].filter(Boolean);
-    return pieces.join(' · ');
+    return pieces.join(' - ');
   }
   return `Nearest train around ${formatTime(schedule.departureTime)}`;
 }
@@ -124,7 +124,7 @@ function sentActivity(schedule: AlertSchedule): ActivityItem[] {
   }
 
   const keys = schedule.deliveryState?.sentKeys || [];
-  return keys.slice(-4).reverse().map((key) => {
+  return keys.slice(-4).reverse().map((key: string) => {
     const type = key.split(':')[2] || 'sent';
     if (type.startsWith('fixed-')) return { title: `${type.replace('fixed-', '')} min reminder sent` };
     if (type.startsWith('delay-')) return { title: 'Delay message sent' };
@@ -165,7 +165,7 @@ export function AlertList({ schedules, routeCards, filter, expandedId, onExpand,
 
   const handleDelete = (id: string) => {
     if (!window.confirm('Delete this alert schedule?')) return;
-    deleteAlertSchedule(id);
+    void deleteAlertSchedule(id);
   };
 
   const handleSendNow = async (id: string) => {
@@ -178,6 +178,9 @@ export function AlertList({ schedules, routeCards, filter, expandedId, onExpand,
     try {
       await testAlert(id);
       setSendState((state) => ({ ...state, [id]: 'sent' }));
+      window.setTimeout(() => {
+        setSendState((state) => ({ ...state, [id]: 'idle' }));
+      }, 2500);
     } catch (error) {
       console.error('Send now failed', error);
       setSendState((state) => ({ ...state, [id]: 'error' }));
@@ -223,7 +226,7 @@ export function AlertList({ schedules, routeCards, filter, expandedId, onExpand,
                 <input
                   type="checkbox"
                   checked={schedule.enabled}
-                  onChange={() => toggleAlertSchedule(schedule.id, !schedule.enabled)}
+                  onChange={() => void toggleAlertSchedule(schedule.id, !schedule.enabled)}
                   disabled={isCompleted(schedule)}
                 />
                 <span className="alert-toggle-slider" />
