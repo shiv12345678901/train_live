@@ -4,6 +4,7 @@ import { HomeScreen } from '@/components/home/HomeScreen';
 import { RouteDetailsPage } from '@/components/route-details/RouteDetailsPage';
 import { ScheduleScreen } from '@/components/schedule/ScheduleScreen';
 import { SettingsScreen } from '@/components/settings/SettingsScreen';
+import { ApiGuidePage } from '@/components/settings/ApiGuidePage';
 import { ErrorBoundary } from '@/components/shared/ErrorBoundary';
 import { RoutePersistence } from '@/components/layout/RoutePersistence';
 import { AppDataSync } from '@/components/layout/AppDataSync';
@@ -20,6 +21,7 @@ function App() {
             <Route path="/route/:id" element={<RouteDetailsPage />} />
             <Route path="/schedule" element={<ScheduleScreen />} />
             <Route path="/settings" element={<SettingsScreen />} />
+            <Route path="/settings/api-guide" element={<ApiGuidePage />} />
           </Route>
         </Routes>
       </BrowserRouter>

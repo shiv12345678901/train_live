@@ -3,6 +3,7 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { SettingRow } from './SettingRow';
 import { useAppStore } from '@/store/appStore';
 import { requestJson } from '@/api/client';
+import { useNavigate } from 'react-router-dom';
 
 type Panel = 'telegram' | 'timezone' | null;
 type TestState = 'idle' | 'sending' | 'sent' | 'error';
@@ -54,6 +55,7 @@ function statusText(ok: boolean, good: string, bad: string): string {
 }
 
 export function SettingsScreen() {
+  const navigate = useNavigate();
   const { settings, updateSettings, routeCards, alertSchedules } = useAppStore();
   const [botTokenInput, setBotTokenInput] = useState(settings.telegramBotToken ?? '');
   const [chatIdInput, setChatIdInput] = useState(settings.telegramChatId ?? '');
@@ -219,6 +221,15 @@ export function SettingsScreen() {
           label="Last Telegram activity"
           value={stats.lastActivity ? stats.lastActivity.message : 'No sent messages recorded yet'}
           status={stats.lastActivity ? 'connected' : 'none'}
+        />
+      </section>
+
+      <section className="setting-section">
+        <h2 className="setting-section-title">Developer</h2>
+        <SettingRow
+          label="API guide"
+          value="Use Train Live data in your personal app"
+          onClick={() => navigate('/settings/api-guide')}
         />
       </section>
 
