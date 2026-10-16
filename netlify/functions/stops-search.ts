@@ -1,4 +1,4 @@
-import { handleCors } from '../../lib/cors';
+import { handleCors, CORS_HEADERS } from '../../lib/cors';
 import type { Handler } from '@netlify/functions';
 import { fetchWithTimeout } from '../../lib/http';
 
@@ -9,20 +9,22 @@ interface StopResult {
   locality: string;
 }
 
+const JSON_HEADERS = { ...CORS_HEADERS, 'Content-Type': 'application/json; charset=utf-8' };
+
 const handler: Handler = async (event) => {
   const corsResp = handleCors(event.httpMethod); if (corsResp) return corsResp;
   if (event.httpMethod !== 'GET') {
-    return { statusCode: 405, body: JSON.stringify({ error: 'Method not allowed' }) };
+    return { statusCode: 405, headers: JSON_HEADERS, body: JSON.stringify({ error: 'Method not allowed' }) };
   }
 
   const query = event.queryStringParameters?.q;
   if (!query || query.trim().length < 2) {
-    return { statusCode: 200, body: JSON.stringify([]) };
+    return { statusCode: 200, headers: JSON_HEADERS, body: JSON.stringify([]) };
   }
 
   const apiKey = process.env.TFN_API_KEY;
   if (!apiKey) {
-    return { statusCode: 200, body: JSON.stringify([]) };
+    return { statusCode: 200, headers: JSON_HEADERS, body: JSON.stringify([]) };
   }
 
   try {
@@ -34,7 +36,7 @@ const handler: Handler = async (event) => {
     });
 
     if (!response.ok) {
-      return { statusCode: 200, body: JSON.stringify([]) };
+      return { statusCode: 200, headers: JSON_HEADERS, body: JSON.stringify([]) };
     }
 
     const data = (await response.json()) as Record<string, unknown>;
@@ -67,12 +69,12 @@ const handler: Handler = async (event) => {
 
     return {
       statusCode: 200,
-      headers: { 'Content-Type': 'application/json' },
+      headers: JSON_HEADERS,
       body: JSON.stringify(stops),
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to search stops';
-    return { statusCode: 500, body: JSON.stringify({ error: message }) };
+    return { statusCode: 500, headers: JSON_HEADERS, body: JSON.stringify({ error: message }) };
   }
 };
 
