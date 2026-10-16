@@ -25,6 +25,22 @@
     Cache-Control = "public, max-age=30, s-maxage=30"
 
 [[headers]]
+  for = "/api/v1/trains"
+  [headers.values]
+    Cache-Control = "public, max-age=30, s-maxage=30"
+    Access-Control-Allow-Origin = "*"
+    Access-Control-Allow-Methods = "GET, OPTIONS"
+    Access-Control-Allow-Headers = "Content-Type"
+
+[[headers]]
+  for = "/api/v1/stops"
+  [headers.values]
+    Cache-Control = "public, max-age=300, s-maxage=600"
+    Access-Control-Allow-Origin = "*"
+    Access-Control-Allow-Methods = "GET, OPTIONS"
+    Access-Control-Allow-Headers = "Content-Type"
+
+[[headers]]
   for = "/.netlify/functions/routes-list"
   [headers.values]
     Cache-Control = "no-store"
@@ -41,6 +57,16 @@
 
 # Compression is enabled by default on Netlify (Feature 41)
 # Static assets get brotli/gzip automatically
+
+[[redirects]]
+  from = "/api/v1/trains"
+  to = "/.netlify/functions/routes-trains"
+  status = 200
+
+[[redirects]]
+  from = "/api/v1/stops"
+  to = "/.netlify/functions/stops-search"
+  status = 200
 
 [[redirects]]
   from = "/*"

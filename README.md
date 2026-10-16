@@ -1,5 +1,7 @@
 # React + TypeScript + Vite
 
+For a personal app consuming this deployment's train data, see [the public API guide](docs/public-api.md).
+
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
 Currently, two official plugins are available:

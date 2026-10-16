@@ -4,6 +4,8 @@ import { detectTransportType, getTimingStatus, type TransportType } from '../../
 import { isRateLimited, getRateLimitHeaders } from '../../lib/rateLimit';
 import { handleCors, CORS_HEADERS } from '../../lib/cors';
 
+const JSON_HEADERS = { ...CORS_HEADERS, 'Content-Type': 'application/json; charset=utf-8' };
+
 type OccupancyLevel = 'empty' | 'low' | 'medium' | 'high' | 'full' | 'unknown';
 
 export interface ServiceAlert {
@@ -359,7 +361,7 @@ const handler: Handler = async (event) => {
   if (event.httpMethod !== 'GET') {
     return {
       statusCode: 405,
-      headers: CORS_HEADERS,
+      headers: JSON_HEADERS,
       body: JSON.stringify({ error: 'Method not allowed' }),
     };
   }
@@ -372,20 +374,10 @@ const handler: Handler = async (event) => {
     return {
       statusCode: 429,
       headers: {
-        ...CORS_HEADERS,
+        ...JSON_HEADERS,
         ...getRateLimitHeaders(rateLimitKey),
       },
       body: JSON.stringify({ error: 'Too many requests' }),
-    };
-  }
-
-  const routeId = event.queryStringParameters?.id;
-
-  if (!routeId) {
-    return {
-      statusCode: 400,
-      headers: CORS_HEADERS,
-      body: JSON.stringify({ error: 'id is required' }),
     };
   }
 
@@ -400,13 +392,13 @@ const handler: Handler = async (event) => {
     const departureAt = event.queryStringParameters?.departureAt;
 
     if (departureAt && !isValidDepartureAt(departureAt)) {
-      return { statusCode: 400, headers: CORS_HEADERS, body: JSON.stringify({ error: 'Invalid departure date and time' }) };
+      return { statusCode: 400, headers: JSON_HEADERS, body: JSON.stringify({ error: 'Invalid departure date and time' }) };
     }
 
     if (!origin || !destination) {
       return {
         statusCode: 400,
-        headers: CORS_HEADERS,
+        headers: JSON_HEADERS,
         body: JSON.stringify({ error: 'origin and destination are required' }),
       };
     }
@@ -416,7 +408,7 @@ const handler: Handler = async (event) => {
     if (!apiKey) {
       return {
         statusCode: 503,
-        headers: CORS_HEADERS,
+        headers: JSON_HEADERS,
         body: JSON.stringify({ error: 'TFN_API_KEY not configured' }),
       };
     }
@@ -434,7 +426,7 @@ const handler: Handler = async (event) => {
 
     return {
       statusCode: 200,
-      headers: CORS_HEADERS,
+      headers: JSON_HEADERS,
       body: JSON.stringify(departures),
     };
   } catch (error) {
@@ -442,7 +434,7 @@ const handler: Handler = async (event) => {
 
     return {
       statusCode: 500,
-      headers: CORS_HEADERS,
+      headers: JSON_HEADERS,
       body: JSON.stringify({
         error: 'Failed to fetch trains',
         detail: msg,
