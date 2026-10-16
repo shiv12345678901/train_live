@@ -63,6 +63,7 @@ export interface RouteTrainFetchOptions {
   destinationStopId?: string;
   mode?: RouteMode;
   limit?: number;
+  departureAt?: string;
 }
 
 function parseMode(value: string | undefined): RouteMode {
@@ -90,6 +91,18 @@ function getSydneyDateParts(date: Date): Record<string, string> {
       hourCycle: 'h23',
     }).formatToParts(date).map((part) => [part.type, part.value])
   );
+}
+
+function sydneyDateTimeKey(date: Date): string {
+  const parts = getSydneyDateParts(date);
+  return `${parts.year}${parts.month}${parts.day}${parts.hour}${parts.minute}`;
+}
+
+function isValidDepartureAt(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)) return false;
+  const [date, time] = value.split('T');
+  const parsed = new Date(`${date}T${time}:00Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 16) === value;
 }
 
 function buildSydneyTripPlannerTimeParams(isoTime: string, addMinutes = 0): string {
@@ -283,6 +296,7 @@ export async function fetchRouteTrainDepartures(options: RouteTrainFetchOptions)
     destinationStopId = '',
     mode = 'train',
     limit = 5,
+    departureAt,
   } = options;
 
   const resultLimit = Math.min(Math.max(Math.round(limit) || 5, 1), 50);
@@ -295,6 +309,17 @@ export async function fetchRouteTrainDepartures(options: RouteTrainFetchOptions)
 
   if (!resolvedDestId) {
     resolvedDestId = await resolveStopId(apiKey, destination);
+  }
+
+  if (departureAt) {
+    const departures = await fetchViaTripPlanner(
+      apiKey, origin, destination, resolvedOriginId, resolvedDestId,
+      mode, resultLimit, undefined, departureAt
+    );
+    const requestedKey = departureAt.replace(/[-T:]/g, '');
+    return departures.filter((departure) =>
+      sydneyDateTimeKey(new Date(departure.scheduledTime)) >= requestedKey
+    ).slice(0, resultLimit);
   }
 
   let departures: TrainDeparture[] = [];
@@ -372,6 +397,11 @@ const handler: Handler = async (event) => {
     const selectedMode = parseMode(event.queryStringParameters?.mode);
     const requestedLimit = Number(event.queryStringParameters?.limit || 5);
     const resultLimit = Math.min(Math.max(Math.round(requestedLimit) || 5, 1), 50);
+    const departureAt = event.queryStringParameters?.departureAt;
+
+    if (departureAt && !isValidDepartureAt(departureAt)) {
+      return { statusCode: 400, headers: CORS_HEADERS, body: JSON.stringify({ error: 'Invalid departure date and time' }) };
+    }
 
     if (!origin || !destination) {
       return {
@@ -399,6 +429,7 @@ const handler: Handler = async (event) => {
       destinationStopId,
       mode: selectedMode,
       limit: resultLimit,
+      departureAt,
     });
 
     return {
@@ -480,7 +511,8 @@ async function fetchViaTripPlanner(
   destinationStopId: string,
   selectedMode: RouteMode,
   resultLimit: number,
-  afterTime?: string
+  afterTime?: string,
+  departureAt?: string
 ): Promise<TrainDeparture[]> {
   const originType = originStopId ? 'stop' : 'any';
   const originName = originStopId || origin;
@@ -496,6 +528,8 @@ async function fetchViaTripPlanner(
     // Add 1 minute to avoid getting the same last result. TfNSW expects
     // Sydney-local itdDate/itdTime values, not the Netlify server timezone.
     timeParams = buildSydneyTripPlannerTimeParams(afterTime, 1);
+  } else if (departureAt) {
+    timeParams = `&itdDate=${departureAt.slice(0, 10).replace(/-/g, '')}&itdTime=${departureAt.slice(11).replace(':', '')}`;
   }
 
   const url =

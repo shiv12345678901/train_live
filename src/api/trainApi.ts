@@ -13,7 +13,8 @@ export async function fetchLiveTrains(
   originStopId?: string,
   destinationStopId?: string,
   limit?: number,
-  mode?: TransportMode
+  mode?: TransportMode,
+  departureAt?: string
 ): Promise<TrainDeparture[]> {
   const params = new URLSearchParams({ id: routeId });
   if (origin) params.set('origin', origin);
@@ -22,6 +23,7 @@ export async function fetchLiveTrains(
   if (destinationStopId) params.set('destinationStopId', destinationStopId);
   if (limit) params.set('limit', String(limit));
   if (mode) params.set('mode', mode);
+  if (departureAt) params.set('departureAt', departureAt);
 
   return requestJson<TrainDeparture[]>(`/routes-trains?${params.toString()}`);
 }
